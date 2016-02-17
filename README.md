@@ -7,7 +7,7 @@ First, you'll need a SQL dump of your schema. Use the db2topg script to convert 
 You can optionnally ask for a script to dump all the data from this database.
 
 If you want to migrate your data, run this produced script. Il will retrieve CSV files from DB2. Then you'll need 
-to import these files into PostgreSQL, thanks to the deltocopy.pl script. You'll need Perl's Text::CSV_XS module
+to import these files into PostgreSQL, thanks to the ``deltocopy.pl`` script. You'll need Perl's Text::CSV_XS module
 (packaged in most Perl environments).
 
 
@@ -24,7 +24,7 @@ You'll probably need to add -i and -w parameters :
 
 ``-w: Password to log on to the server where the database resides``
 
-Then, convert this file using db2topg.pl:
+Then, convert this file using ``db2topg.pl``:
 
 ``./db2topg.pl -f my_db2_sql_script -o my_output_dir -d db2_dbname -u db2_user -p db2_pwd``
 

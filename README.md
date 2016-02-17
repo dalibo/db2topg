@@ -50,7 +50,7 @@ Now, if you need, you can use the export.db2 script (on the DB2 server, or a mac
 
 It will produce a bunch of del/lob files, containing all your database's tables' content.
 
-There is also a parallel_unload.pl script to try and run several db2 scripts in parallel. This is a bit ugly, as db2 does its best not to accept running more than once per tty. So this script does su to create new ttys and run db2 commands in them. Use at your own peril (and if you have a better way of running several db2 commands at the same time, PLEASE tell me).
+There is also a ``parallel_unload.pl`` script to try and run several db2 scripts in parallel. This is a bit ugly, as db2 does its best not to accept running more than once per tty. So this script does su to create new ttys and run db2 commands in them. Use at your own peril (and if you have a better way of running several db2 commands at the same time, PLEASE tell me).
 
 Now, you can convert and inject all these into PostgreSQL, using the deltocopy.pl script. For deltocopy, you need Perl::CSV::XS
 

@@ -1,17 +1,14 @@
 Overview
 ========================
 
-This is still a WIP. A lot of this code is untested. This warning will be removed in a few weeks.
-
-
 This set of scripts converts as much as possible of a DB2 database.
 
 First, you'll need a SQL dump of your schema. Use the db2topg script to convert it to a PostgreSQL schema.
 You can optionnally ask for a script to dump all the data from this database.
 
 If you want to migrate your data, run this produced script. Il will retrieve CSV files from DB2. Then you'll need 
-to import these files into PostgreSQL, thanks to the deltocopy.pl script. You'll neet Perl's Text::CSV_XS module
-(packaged in most Perl environment).
+to import these files into PostgreSQL, thanks to the deltocopy.pl script. You'll need Perl's Text::CSV_XS module
+(packaged in most Perl environments).
 
 
 Steps
@@ -60,7 +57,7 @@ Now, you can convert and inject all these into PostgreSQL, using the deltocopy.p
 
 deltocopy produces all the COPY statements to load data into PostgreSQL to its stdout.
 
-If you are in a hurry, and your server can bear it, there is a parallel mode. I advise you to only use it when you have validated that everything is ok:
+If you are in a hurry, and your server can bear it, there is a parallel mode. I advise you to only use it when you have validated that everything is ok at least once:
 
   time deltocopy.pl -d my_output_dir -j 12 -o 'psql mydb' 2>&1 | tee import_log
 

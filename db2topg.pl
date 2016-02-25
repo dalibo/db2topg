@@ -429,7 +429,7 @@ sub parse_dump
 						# End of the columns definition
 						$incols=0;
 					}
-					if (defined ($colgeneratedbydefaultidentity))
+					if (defined ($colgeneratedbydefaultidentity) and not (defined ($colgeneratedbydefaultexpression))) # Seems there is a bug in certain versions of perl, capturing the GENERATED two times
 					{			
 						if ($colgeneratedbydefaultidentity eq 'BY DEFAULT')
 						{
@@ -497,7 +497,7 @@ sub parse_dump
 						print STDERR "==>Warning: column $colname of table $schema.$table has a default value using an expression. This may not work... you may have to correct this manually, and write a trigger<==\n";
 					}
 				}
-				elsif ($line =~ /^\s+(?:IN (\S+) )?(?:INDEX IN (\S+) )?(?:LONG IN (\S+) )?;\s*$/)
+				elsif ($line =~ /^\s*(?:IN "(.*?)\s*")? *(?:INDEX IN "(.*?)\s*")? *(?:LONG IN "(.*?)\s*")?\s*;?\s*$/)
 				{
 						$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{TBSTABLE}=$1 if (defined $1);
 						$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{TBSINDEX}=$2 if (defined $2);

@@ -113,6 +113,37 @@ sub slurp_comment
 	
 }
 
+# With DB2, one can specify «with default», with no default value. If that's the case, there is a «default» default value
+sub find_default_default
+{
+	my ($type)=@_;
+	if ($type =~ /^(SMALLINT|INT|BIGINT|DECIMAL|NUMERIC|REAL|DOUBLE|DECFLOAT|FLOAT)/i)
+	{
+		return 0;
+	}
+	if ($type =~ /^(CHAR|GRAPHIC)/i)
+	{
+		return "''";
+	}
+	if ($type =~ /^(VARCHAR|CLOB|VARGRAPHIC|DBCLOB|VARBINARY|BLOB)/i)
+	{
+		return "''";
+	}
+	if ($type =~ /^DATE/i)
+	{
+		return 'current_date';
+	}
+	if ($type =~ /^TIME/i)
+	{
+		return 'current_time';
+	}
+	if ($type =~ /^TIMESTAMP/i)
+	{
+		return 'current_timestamp';
+	}
+	die "Unknown type $type when trying to find 'default' default value for a type\n";
+}
+
 # Convert DB2's peculiar types to PostgreSQL
 sub convert_type
 {
@@ -865,9 +896,16 @@ sub get_coldef
 	{
 		$rv .= ' NOT NULL';
 	}
-	if ($default)
+	if (defined($default))
 	{
-		$rv .= ' DEFAULT ' . try_fix_expression($default);
+		if ($default eq '')
+		{
+			$rv .= ' DEFAULT ' . find_default_default($type); # This is a WITH DEFAULT without anything more
+		}
+		else
+		{
+			$rv .= ' DEFAULT ' . try_fix_expression($default);
+		}
 	}
 	return $rv;
 }

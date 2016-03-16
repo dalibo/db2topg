@@ -113,7 +113,8 @@ sub slurp_comment
 	
 }
 
-# With DB2, one can specify «with default», with no default value. If that's the case, there is a «default» default value
+# With DB2, one can specify «with default», with no default value. If that's the case, there is a «default» default value.
+# This function should be called when you need to find the default value to a type. It is returned as the SQL litteral to be used.
 sub find_default_default
 {
 	my ($type)=@_;

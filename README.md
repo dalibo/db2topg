@@ -10,6 +10,7 @@ If you want to migrate your data, run this produced script. Il will retrieve CSV
 to import these files into PostgreSQL, thanks to the ``deltocopy.pl`` script. You'll need Perl's Text::CSV_XS module
 (packaged in most Perl environments).
 
+Pull requests and issues are very welcome to help me improve this tool.
 
 Steps
 ========================

@@ -1,7 +1,7 @@
 Overview
 ========================
 
-This set of scripts converts as much as possible of a DB2 database.
+This set of scripts converts as much as possible of a DB2 UDB database. It does not work with DB2 zOS.
 
 First, you'll need a SQL dump of your schema. Use the db2topg script to convert it to a PostgreSQL schema.
 You can optionnally ask for a script to dump all the data from this database.

@@ -545,6 +545,10 @@ sub parse_dump
 				{
 					next;
 				}
+				elsif ($line =~ /^\s*COMPRESS (NO|YES)/)
+				{
+					next;
+				}
 				else
 				{
 					die "I don't understand $line in a CREATE TABLE section";

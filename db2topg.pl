@@ -332,6 +332,7 @@ sub parse_dump
 		next if ($line =~ /^COMMIT WORK/);
 		next if ($line =~ /^TERMINATE/);
 		next if ($line =~ /^(CREATE|ALTER) STOGROUP/);
+		next if ($line =~ /^SET NLS_STRING_UNITS/);
 			if ($line =~ /^CREATE (?:REGULAR|LARGE|(?:USER )?TEMPORARY) TABLESPACE "(.*?)\s*"/)
 		{
 			# Parse tablespace

@@ -540,7 +540,7 @@ sub parse_dump
 				{
 					next;
 				}
-				elsif ($line =~ /^\s*ORGANIZE BY/)
+				elsif ($line =~ /^\s*DISTRIBUTE BY/)
 				{
 					next;
 				}

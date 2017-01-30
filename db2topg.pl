@@ -848,12 +848,17 @@ sub parse_dump
 			$objview->{CURRENT_PATH}=$current_path;
 			push @{$schema_db2->{VIEWS}},($objview);
 		}
-		elsif ($line =~ /^CREATE TRIGGER (\S+)\s*\.(\S+)\s*$/)
+		elsif ($line =~ /^CREATE TRIGGER (\S+)\s*\.(\S+)\s*?(\S.*)?$/)
 		{
 			# Same as with views. Not a lot we can do about triggers, languages are too different
 			# SQL is as input by the user, so let's take care about case
 			my $schema=$1;
 			my $trigger=$2;
+			my $leftover=$3;
+			if (not defined $leftover)
+			{ # There is no leftover
+				$leftover='';
+			}
 			unless ($schema =~ /^"/)
 			{
 				$schema=uc($schema);

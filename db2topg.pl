@@ -536,6 +536,14 @@ sub parse_dump
 						$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{TBSINDEX}=$2 if (defined $2);
 						$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{TBSLONG}=$3 if (defined $3);
 				}
+				elsif ($line =~ /^\s*ORGANIZE BY ROW/)
+				{
+					next;
+				}
+				elsif ($line =~ /^\s*ORGANIZE BY/)
+				{
+					next;
+				}
 				else
 				{
 					die "I don't understand $line in a CREATE TABLE section";

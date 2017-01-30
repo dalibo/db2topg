@@ -333,6 +333,7 @@ sub parse_dump
 		next if ($line =~ /^TERMINATE/);
 		next if ($line =~ /^(CREATE|ALTER) STOGROUP/);
 		next if ($line =~ /^SET NLS_STRING_UNITS/);
+		next if ($line =~ /^ALTER TABLE.*VOLATILE CARDINALITY;/);
 			if ($line =~ /^CREATE (?:REGULAR|LARGE|(?:USER )?TEMPORARY) TABLESPACE "(.*?)\s*"/)
 		{
 			# Parse tablespace

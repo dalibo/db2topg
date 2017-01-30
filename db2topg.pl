@@ -751,6 +751,14 @@ sub parse_dump
 			{
 				die ("Overflow in comment on column: " . join('',@$refstatement)) unless ($#$refstatement == -1);
 			}
+			if ($line =~ /^\s*COMPRESS\s+(NO|YES)/)
+			{
+				next;
+			}
+			if ($line =~ /^$/) # Sometimes happens
+			{
+				next;
+			}
 			else
 			{
 				die "I don't understand $line in an CREATE INDEX section";

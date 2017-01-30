@@ -651,6 +651,10 @@ sub parse_dump
 							$object{"ON".$1}=$2;
 						}
 					}
+					elsif ($line =~ /\s*DISABLE QUERY OPTIMIZATION/)
+					{
+						next;
+					}
 					else
 					{
 						die "I don't understand $line in an ALTER TABLE FOREIGN KEY SECTION"

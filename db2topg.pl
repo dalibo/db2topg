@@ -3,7 +3,7 @@
 #
 #         FILE: db2topg.pl
 #
-#        USAGE: ./db2topg.pl  
+#        USAGE: ./db2topg.pl
 #
 #  DESCRIPTION: Convert a DB2 SQL schema dump to a PostgreSQL dump
 #
@@ -81,8 +81,8 @@ sub read_statement
 	}
 	if ($read)
 	{
-		# Cleanup trailing semi-colon
-		$statement[-1]=~ s/;$//;
+		# Cleanup trailing semi-colon (and spaces after it)
+		$statement[-1]=~ s/;\s*$//;
 		return \@statement;
 	}
 	return undef; # Behave like read: return undef if reads nothing
@@ -110,7 +110,7 @@ sub slurp_comment
 	$comment =~ s/'$//si;
 
 	return $comment;
-	
+
 }
 
 # With DB2, one can specify «with default», with no default value. If that's the case, there is a «default» default value.
@@ -153,7 +153,7 @@ sub convert_type
 	# CLOB and BLOB can have more specifications (logged, compact, etc…). We ignore them completely
 	if ($in_type =~ /^BLOB\((\d+)\)/)
 	{
-		$out_type="bytea"; # Could add a check constraint to verify size, but most of the time, the size is here 
+		$out_type="bytea"; # Could add a check constraint to verify size, but most of the time, the size is here
 	}
 	elsif ($in_type =~ /^CLOB\((\d+)\)/)
 	{
@@ -180,8 +180,8 @@ sub _protect_reserved_keywords
 {
 	my ($kw)=@_;
 	croak unless (defined $kw);
-	
-	
+
+
 	# First store the ASC/DESC somewhere if there is one
 	my $ascdesc='';
 	if ($kw =~ s/(\s+(?:ASC|DESC))//)
@@ -201,7 +201,7 @@ sub _protect_reserved_keywords
 	}
 	# Put back the ascdesc at the end
 	$kw .= $ascdesc;
-	
+
 	return lc($kw); # FIXME: change this if we want to do a case sensitive schema
 }
 
@@ -233,13 +233,13 @@ sub try_fix_expression
 	$data =~ s/\bLCASE\(/lower(/gi;
 	# Type conversions
 	$data =~ s/\bCHAR\(/to_char(/gi;
-	
+
 	# for an empty blob:
 	if ($data =~ /"SYSIBM"."BLOB"/)
 	{
 		$data="''"; # Automatically casted in PostgreSQL, no need!
 	}
-	
+
 	# The rest
 	$data =~ s/WITH ROW MOVEMENT|WITH NO ROW MOVEMENT//i; # No meaning anyway in PG
 	return $data;
@@ -252,7 +252,7 @@ my %renames; # Contains all the object names (sequences, tables, indexes…) I h
 sub check_and_rename
 {
 	my ($schema,$name,$type)=@_;;
-	
+
 	# First, populate %renames if this is the first call, with the table names (these wont move)
 	unless (%renames)
 	{
@@ -266,7 +266,7 @@ sub check_and_rename
 	}
 	$schema=protect_reserved_keywords($schema);
 	$name=protect_reserved_keywords($name);
-	# Ok, we got called, 
+	# Ok, we got called,
 	# We first try the name without modification
 	# Then we try to add the object_type at the end of the name
 	# Then we add a number at the end of its name in a loop until it does not conflict (start with an empty string)
@@ -310,15 +310,15 @@ sub parse_dump
         $data_guess .= $line;
     }
     close IN;
-	
+
 
 
     # We now ask guess...
     my $decoder = guess_encoding($data_guess, qw/iso8859-15 utf8 utf16-le utf16-be/);
-    die $decoder unless ref($decoder);	
+    die $decoder unless ref($decoder);
 
 #	print "encoding: " . $decoder->name . "\n";
-	
+
 	open IN, "<:encoding(".$decoder->name.")",$filename or die "Cannot open $filename, $!";
 	MAIN:
 	while (my $refstatement=read_statement)
@@ -334,7 +334,7 @@ sub parse_dump
 		next if ($line =~ /^(CREATE|ALTER) STOGROUP/);
 		next if ($line =~ /^SET NLS_STRING_UNITS/);
 		next if ($line =~ /^ALTER TABLE.*VOLATILE CARDINALITY/);
-			if ($line =~ /^CREATE (?:REGULAR|LARGE|(?:USER )?TEMPORARY) TABLESPACE "(.*?)\s*"/)
+		if ($line =~ /^CREATE (?:REGULAR|LARGE|(?:USER )?TEMPORARY) TABLESPACE "(.*?)\s*"/)
 		{
 			# Parse tablespace
 			my $name=$1;
@@ -342,7 +342,7 @@ sub parse_dump
 			while (my $line=shift(@$refstatement))
 			{
 				# Read the rest of create tablespace
-				if ($line =~ /^\s+USING \((?:FILE )?'(.*)'(?: \d+)?(\)|,)$/)
+				if ($line =~ /^\s*USING \((?:\s?FILE )?'(.*)'(?: \d+)?\s?(\)|,)/)
 				{
 					push @{$schema_db2->{TABLESPACE}->{$name}->{PATH}},($1);
 					if ($2 eq ',')
@@ -364,7 +364,7 @@ sub parse_dump
 						next;
 					}
 				}
-				next if ($line =~ /EXTENTSIZE|PREFETCHSIZE|BUFFERPOOL|OVERHEAD|TRANSFERRATE|AUTORESIZE|INCREASESIZE|MAXSIZE|FILE SYSTEM CACHING|DROPPED TABLE/);
+				next if ($line =~ /EXTENTSIZE|PAGESIZE|INITIALSIZE|PREFETCHSIZE|BUFFERPOOL|OVERHEAD|TRANSFERRATE|AUTORESIZE|INCREASESIZE|MAXSIZE|FILE SYSTEM CACHING|DROPPED TABLE/);
 				die "I don't understand $line in a CREATE TABLESPACE section";
 			}
 		} #CREATE TABLESPACE
@@ -373,7 +373,7 @@ sub parse_dump
 			my %empty_hash=();
 			$schema_db2->{ROLES}->{$1}=\%empty_hash;
 			die ("Overflow in create role: " . join('',@$refstatement)) unless ($#$refstatement == -1);
-		
+
 		}
 		elsif ($line =~ /^COMMENT ON ROLE "(.*?)\s*" IS '(.*?)'?$/)
 		{
@@ -381,8 +381,14 @@ sub parse_dump
 			$schema_db2->{ROLES}->{$1}->{COMMENT}=$2 . "\n" . slurp_comment($refstatement);
 			chomp $schema_db2->{ROLES}->{$1}->{COMMENT};
 		}
+		elsif ($line =~ /^CREATE SCHEMA "(.*?)\s*"\s*$/)
+		{
+			$schema_db2->{SCHEMAS}->{$1}=undef; #Nothing to store, but still has to be created
+
+		}
 		elsif ($line =~ /^CREATE SCHEMA "(.*?)\s*"\s+AUTHORIZATION\s+"(.*)\s*"\s*$/)
 		{
+			print STDERR "MATCHED CREATE SCHEMA\n";
 			$schema_db2->{SCHEMAS}->{$1}->{AUTHORIZATION}=$2;
 			# Some roles may be there, and not have been created. I don't know why db2 would do this, but take care of it…
 			unless (exists $schema_db2->{ROLES}->{$2})
@@ -392,7 +398,7 @@ sub parse_dump
 			}
 			die ("Overflow in create schema: " . join('',@$refstatement)) unless ($#$refstatement == -1);
 		}
-		elsif ($line =~ /^CREATE SEQUENCE "(.*?)\s*"\."(.*?)\s*" AS INTEGER$/)
+		elsif ($line =~ /^CREATE SEQUENCE "(.*?)\s*"\."(.*?)\s*" AS INTEGER\s*$/)
 		{
 			my $schema=$1;
 			my $sequence=$2;
@@ -408,10 +414,21 @@ sub parse_dump
 					$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{STARTWITH}=$1;
 					$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{INCREMENTBY}=$2;
 				}
-				elsif ($line =~ /CACHE (\d+) (NO )?CYCLE/)
+				#elsif ($line =~ /(NO )?CACHE (\d+)?(NO )?CYCLE/)
+				elsif ($line =~ /(CACHE.*CYCLE)/)
 				{
-					$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CACHE}=$1;
-					if (defined $2)
+					if ($line =~ /(NO )?\s*CACHE\s*(\d+)?/ )
+					{
+						if ( defined($1) )
+						{
+							$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CACHE}=0;
+						}
+						else
+						{
+							$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CACHE}=$2;
+						}
+					}
+					if ($line =~ /NO CYCLE/ )
 					{
 						$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CYCLE}=0;
 					}
@@ -426,7 +443,7 @@ sub parse_dump
 				}
 			}
 		} #CREATE SEQUENCE
-		elsif ($line =~ /^ALTER SEQUENCE "(.*?)\s*"\."(.*?)\s*" RESTART WITH (\d+)$/)
+		elsif ($line =~ /^ALTER SEQUENCE "(.*?)\s*"\."(.*?)\s*" RESTART WITH (\d+)\s*$/)
 		{
 			$schema_db2->{SCHEMAS}->{$1}->{SEQUENCES}->{$2}->{RESTARTWITH}=$3;
 			die ("Overflow in alter sequence: " . join('',@$refstatement)) unless ($#$refstatement == -1);
@@ -465,7 +482,7 @@ sub parse_dump
 						$incols=0;
 					}
 					if (defined ($colgeneratedbydefaultidentity) and not (defined ($colgeneratedbydefaultexpression))) # Seems there is a bug in certain versions of perl, capturing the GENERATED two times
-					{			
+					{
 						if ($colgeneratedbydefaultidentity eq 'BY DEFAULT')
 						{
 							$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{COLS}->{$colname}->{IDENTITY}->{ALWAYS}=0;
@@ -478,6 +495,8 @@ sub parse_dump
 						# It's multi-line. Let's read the rest. There is always the exact same records
 						while (my $line=shift(@$refstatement))
 						{
+
+
 							$line =~ /START WITH \+(\d+)|INCREMENT BY \+(\d+)|MINVALUE \+(\d+)|MAXVALUE \+(\d+)|(NO CYCLE)|(NO )?CACHE (\d+)?|(NO ORDER \) ,)/ or die "Cannot understand $line in an IDENTITY definition";
 							if (defined ($1))
 							{
@@ -561,7 +580,7 @@ sub parse_dump
 			my $schema=$1;
 			my $table=$2;
 			my $line=shift(@$refstatement);
-			if ($line=~/^\s+ADD(?: CONSTRAINT "(.*?)\s*"\s*)? (PRIMARY KEY|UNIQUE)$/)
+			if ($line=~/^\s+ADD(?: CONSTRAINT "(.*?)\s*"\s*)? (PRIMARY KEY|UNIQUE)\s*$/)
 			{
 				my %object;
 				my $type=$2;
@@ -635,7 +654,7 @@ sub parse_dump
 				}
 				while (my $line=shift(@$refstatement))
 				{
-					if ($line =~/^\s+(?:ON (DELETE|UPDATE) (RESTRICT|NO ACTION|CASCADE)|(ENFORCED)|(ENABLE QUERY OPTIMIZATION))\s*;?$/)
+					if ($line =~/^\s+(?:ON (DELETE|UPDATE) (RESTRICT|NO ACTION|CASCADE)|(ENFORCED)|(ENABLE QUERY OPTIMIZATION))\s*$/)
 					{
 						if (defined $3)
 						{
@@ -735,7 +754,8 @@ sub parse_dump
 
 			# We may have an include definition
 			$line=shift(@$refstatement);
-			if ($line=~/INCLUDE \((\S+) (,|\));?$/)
+			if ($line=~/INCLUDE \((\S+) (,|\))?\s*$/)
+
 			{
 				push @{$schema_db2->{SCHEMAS}->{$tableschema}->{TABLES}->{$tablename}->{INDEXES}->{$indexname}->{INCLUDECOLS}},($1);
 				if ($2 eq ',') # There are more columns
@@ -760,11 +780,11 @@ sub parse_dump
 			{
 				die ("Overflow in comment on column: " . join('',@$refstatement)) unless ($#$refstatement == -1);
 			}
-			if ($line =~ /^\s*COMPRESS\s+(NO|YES)/)
+			elsif ($line =~ /^\s*COMPRESS\s+(NO|YES)/)
 			{
 				next;
 			}
-			if ($line =~ /^$/) # Sometimes happens
+			elsif ($line =~ /^$/) # Sometimes happens
 			{
 				next;
 			}
@@ -813,7 +833,7 @@ sub parse_dump
 			# Current schema. Probably for an incoming create view. Store it globally, we will add these info to the view
 			$current_schema=$1;
 		}
-		elsif ($line =~ /^SET CURRENT PATH = (\S+)\s*$/)
+		elsif ($line =~ /^SET CURRENT PATH = (\S+)+\s*$/)
 		{
 			# Current path. Probably for an incoming create view. Store it globally, we will add these info to the view
 			$current_path=$1;
@@ -827,7 +847,7 @@ sub parse_dump
 			my $definition=$3;
 			if (defined $1)
 			{
-				# Oh, by the way, as this is exactly the input statement from the user when he created the view, case can be whatever… 
+				# Oh, by the way, as this is exactly the input statement from the user when he created the view, case can be whatever…
 				# check if the schema starts with a double quote, who knows…
 				$schema=$1;
 # 				unless ($schema =~ /^"/)
@@ -848,13 +868,15 @@ sub parse_dump
 			$objview->{CURRENT_PATH}=$current_path;
 			push @{$schema_db2->{VIEWS}},($objview);
 		}
-		elsif ($line =~ /^CREATE TRIGGER (\S+)\s*\.(\S+)\s*?(\S.*)?$/)
+		elsif ( $line =~ /^CREATE (OR REPLACE )?TRIGGER ((\S+\.)?(\S+)).*$/)
+		#elsif ($line =~ /^CREATE (OR REPLACE )?TRIGGER (\S+\.)?.(\S)\s?/)
 		{
 			# Same as with views. Not a lot we can do about triggers, languages are too different
 			# SQL is as input by the user, so let's take care about case
-			my $schema=$1;
-			my $trigger=$2;
-			my $leftover=$3;
+			my $schema=$3 // "";
+			my $trigger=$2 // "" ;
+			my $leftover=$4 // "" ;
+
 			if (not defined $leftover)
 			{ # There is no leftover
 				$leftover='';
@@ -888,7 +910,7 @@ sub parse_dump
 			$schema =~ s/\s*"//;
 			$function =~ s/^"//;
 			$function =~ s/\s*"//;
-			
+
 			{
 				$schema=uc($schema);
 			}
@@ -902,7 +924,7 @@ sub parse_dump
 			$schema_db2->{SCHEMAS}->{$schema}->{FUNCTIONS}->{$function}->{STATEMENT}= slurp_statement($refstatement);
 
 		}
-		elsif ($line =~ /^GRANT/)
+		elsif ($line =~ /^\s*GRANT/)
 		{
 			# The privilege system is too different. Just ignore it
 			next;
@@ -949,13 +971,13 @@ sub produce_schema_files
 	my $before_file=$data_directory . '/' . "before.sql";
 	open BEFORE, '>:utf8', $before_file or die "Cannot open $before_file for writing, $!";
 	print BEFORE "set client_encoding to UTF8;\n";
-	
+
 	# Do the AFTER file:
 	my $after_file=$data_directory . '/' . "after.sql";
 	open AFTER, '>:utf8', $after_file or die "Cannot open $before_file for writing, $!";
 	print AFTER "set client_encoding to UTF8;\n";
-	
-	
+
+
 	my $unsure_file=$data_directory . '/' . "unsure.sql";
 	open UNSURE, '>:utf8', $unsure_file or die "Cannot open unsure_file for writing, $!";
 	print UNSURE "-- This file probably won't work as is. Try to run it, catch errors, and try to correct it\n";
@@ -996,16 +1018,16 @@ sub produce_schema_files
 		}
 		print BEFORE "CREATE SCHEMA " . protect_reserved_keywords($schema) . $authorization . ";\n\n";
 	}
-	
+
 	# Do the create sequences
 	foreach my $schema (keys(%{$schema_db2->{SCHEMAS}}))
 	{
 		foreach my $sequence (keys(%{$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}}))
 		{
 			my $sobj=$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence};
-			
+
 			my $seqname=check_and_rename($schema,$sequence,'SEQUENCE');
-			
+
 			print BEFORE "CREATE SEQUENCE " , protect_reserved_keywords($schema),".", protect_reserved_keywords($seqname),
 						" INCREMENT BY " , $sobj->{INCREMENTBY} , "\n",
 						" MINVALUE " , $sobj->{MINVALUE} , " MAXVALUE " , $sobj->{MAXVALUE} , "\n",
@@ -1024,7 +1046,7 @@ sub produce_schema_files
 				print BEFORE "ALTER SEQUENCE ",protect_reserved_keywords($schema),".", protect_reserved_keywords($seqname),
 				             " RESTART WITH ",$start,";\n";
 			}
-			
+
 		}
 	}
 	# Do the create domains (before the tables…)
@@ -1037,7 +1059,7 @@ sub produce_schema_files
 		}
 	}
 	print BEFORE "\n";
-	
+
 	# Do the create tables
 	foreach my $schema (keys(%{$schema_db2->{SCHEMAS}}))
 	{
@@ -1066,10 +1088,10 @@ sub produce_schema_files
 				}
 			}
 			print BEFORE ";\n\n"; # End of the statement
-			
 
 
-			
+
+
 			# Do the comments on tables and columns
 			if (exists $schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{COMMENT})
 			{
@@ -1089,9 +1111,9 @@ sub produce_schema_files
 
 		}
 	}
-	
 
-	
+
+
 
 	# CREATE PKs and UNIQUE
 	foreach my $schema (keys(%{$schema_db2->{SCHEMAS}}))
@@ -1122,7 +1144,7 @@ sub produce_schema_files
 			}
 		}
 	}
-	
+
 	# CREATE INDEXES. Beware the covering indexes (don't exist yet in PostgreSQL
 	foreach my $schema (keys(%{$schema_db2->{SCHEMAS}}))
 	{
@@ -1135,7 +1157,7 @@ sub produce_schema_files
 				# PostgreSQL has no covering index. It means it cannot add columns to a unique index that aren't part of the UNIQUE constraint
 				# So if we have a covering index, and it is unique, we will produce two indexes for now. If one of these days PostgreSQL has
 				# covering indexes (patches are under way), change this
-				
+
 				print AFTER "CREATE ", $iobj->{UNIQUE}?'UNIQUE ':'' ,"INDEX ",
 				            check_and_rename($schema,$index,'INDEX'),
 				            ' ON ' . protect_reserved_keywords($schema),'.',protect_reserved_keywords($table),
@@ -1150,8 +1172,8 @@ sub produce_schema_files
 						# We finish the index and create a new one
 						print AFTER ");\n";
 						print AFTER "CREATE INDEX ",
-						            check_and_rename($schema,$index.'_cov1','INDEX'), 
-									' ON ' . protect_reserved_keywords($schema),'.',protect_reserved_keywords($table),         
+						            check_and_rename($schema,$index.'_cov1','INDEX'),
+									' ON ' . protect_reserved_keywords($schema),'.',protect_reserved_keywords($table),
 						            ' (',join (',',protect_reserved_keywords(@{$iobj->{COLS}})),',',join (',',protect_reserved_keywords(@{$iobj->{INCLUDECOLS}})),
 						            ");\n";
 						print STDERR "==> IMPORTANT: $index is a UNIQUE covering index. These don't exist yet in PostgreSQL. I replaced it with 2 indexes<==\n";
@@ -1194,7 +1216,7 @@ sub produce_schema_files
 				# We will try to validate everything in unsure.sql
 				print AFTER " NOT VALID";
 				print AFTER ";\n";
-				
+
 				print UNSURE "ALTER TABLE ",protect_reserved_keywords($schema),".",protect_reserved_keywords($table), " VALIDATE CONSTRAINT ";
 				print UNSURE protect_reserved_keywords($constraint->{NAME});
 				print UNSURE ";\n";
@@ -1238,18 +1260,18 @@ sub produce_schema_files
 	}
 
 
-	
 
 
-	
-	
+
+
+
 	# CHECK constraints
 	foreach my $schema (keys(%{$schema_db2->{SCHEMAS}}))
 	{
 		foreach my $table (keys(%{$schema_db2->{SCHEMAS}->{$schema}->{TABLES}}))
 		{
 			my $tobj=$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table};
-			
+
 			foreach my $constraint (@{$tobj->{CONSTRAINTS}})
 			{
 				next unless ($constraint->{TYPE} eq 'CHECK');
@@ -1281,7 +1303,7 @@ sub produce_schema_files
 		foreach my $view (keys(%{$schema_db2->{SCHEMAS}->{$schema}->{VIEWS}}))
 		{
 			my $vobj=$schema_db2->{SCHEMAS}->{$schema}->{VIEWS}->{$view};
-		
+
 			if (exists $vobj->{COMMENT})
 			{
 				print UNSURE "COMMENT ON VIEW ",protect_reserved_keywords($schema),".",
@@ -1295,7 +1317,7 @@ sub produce_schema_files
 	print UNSURE "-- They are only here so that they crash at creation and you notice them and correct them by hand\n";
 	foreach my $schema (keys(%{$schema_db2->{SCHEMAS}}))
 	{
-		
+
 		foreach my $function (keys %{$schema_db2->{SCHEMAS}->{$schema}->{FUNCTIONS}})
 		{
 			my $funcobj=$schema_db2->{SCHEMAS}->{$schema}->{FUNCTIONS}->{$function};
@@ -1303,14 +1325,14 @@ sub produce_schema_files
 							" AS\n\$func\$\n",
 							$funcobj->{STATEMENT},"\n\$func\$\n;\n";
 		}
-	}	
+	}
 
 	# Triggers
 	print UNSURE "-- Under this point, are triggers. There is NO WAY they will work\n";
 	print UNSURE "-- They are only here so that they crash at creation and you notice them and correct them by hand\n";
 	foreach my $schema (keys(%{$schema_db2->{SCHEMAS}}))
 	{
-		
+
 		foreach my $trigger (keys %{$schema_db2->{SCHEMAS}->{$schema}->{TRIGGERS}})
 		{
 			my $trigobj=$schema_db2->{SCHEMAS}->{$schema}->{TRIGGERS}->{$trigger};
@@ -1320,12 +1342,12 @@ sub produce_schema_files
 			#FIXME: Should create the trigger, but that's not possible, as the function will fail
 			print UNSURE "-- Add the CREATE TRIGGER too!\n\n\n";
 		}
-	}	
-	
+	}
+
 	close BEFORE;
 	close AFTER;
 	close UNSURE;
-	
+
 }
 
 
@@ -1334,8 +1356,8 @@ sub export_data
 	# FIXME: for the moment, note all parameters to pass
 	#codepage=UTF-8
 	#modified by timestampformat="YYYY-MM-DD HH.MM.SS.uuuuuu"
-	
-	
+
+
 	# Store what we need from the catalog, for deltocopy: a list of tables, colnames and types. Make a very simple, tab separated format
 	my $tabledescname=$data_directory . '/' . "TABLEDESC";
 	open TABLEDESC,">", $tabledescname or die "Cannot open $tabledescname for writing, $!";
@@ -1353,15 +1375,15 @@ sub export_data
 		}
 	}
 	close TABLEDESC;
-	
+
 	# Produce the script
 #	my $scriptname=$data_directory . '/export.db2' . (is_target_windows()?'.bat':'.sh');
 	my $scriptname=$data_directory . '/export.db2';
-	
+
 	open SCRIPT,">",$scriptname or die "Cannot open $scriptname for writing, $!";
 
 
-	
+
 	# First connect
 	print SCRIPT "connect to $db2dbname user $db2username using '$db2password'\n";
 	# We sort, it gives a very rough idea of the export progression
@@ -1377,7 +1399,7 @@ sub export_data
 # To know if the operating system is windows or linux
 sub is_os_windows
 {
-	
+
     if ($^O =~ /MSWin32/)
     {
         return 1;
@@ -1451,7 +1473,7 @@ if ( not $filename or not $data_directory)
     exit 1;
 }
 
-	
+
 
 
 

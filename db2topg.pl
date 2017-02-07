@@ -46,13 +46,15 @@ sub read_statement
 	my @statement;
 	my $read;
 	my $seen_end_function=0;
+	my $marker;
 	while (my $line=read_and_cleanup_line())
 	{
+		$line =~ s/\r//; # We sometimes have windows input
 		next if ($line=~/^\s*$/);
 		$read=1;
 		push @statement,($line);
 		# We have an exception for create functions: there will be semi-columns inside…
-		if ($statement[0] !~ /CREATE.*FUNCTION/i)
+		if ($statement[0] !~ /CREATE.*(FUNCTION|PROCEDURE)/i)
 		{
 			last if ($line=~/;\s*$/);
 		}
@@ -60,15 +62,27 @@ sub read_statement
 		{
 			# There are functions containing SQL, others containing a sort of plpgsql
 			# If the function contains a begin atomic, lets suppose it's sort of plpgsql
-			if (scalar(grep(/^\s*begin\s+atomic\s*/i,@statement))==0)
+
+			if ( $line =~ /^(?:(.*): )?begin\s+atomic\s*/i)
+			{
+				if (defined $1)
+				{
+					$marker=" $1"; # We add a space before, it will simplify the regexp in the following test
+				}
+				else
+				{
+					$marker="";
+				}
+			}
+			if (not defined($marker) )
 			{
 				# Stop as soon as there is a semicolon
 				last if ($line=~/;\s*$/);
 			}
 			else
 			{
-				# We stop when we have seen the "end" keyword, and the semi colon after it
-				if ($line =~ /end;?\s*$/)
+				# We stop when we have seen the "end" keyword, the optional marker and the semi colon after it
+				if ($line =~ /^\s*end${marker}\s*$/)
 				{
 					$seen_end_function=1;
 				}
@@ -83,6 +97,8 @@ sub read_statement
 	{
 		# Cleanup trailing semi-colon (and spaces after it)
 		$statement[-1]=~ s/;\s*$//;
+		# Remove \n at the end of each line
+		chomp @statement;
 		return \@statement;
 	}
 	return undef; # Behave like read: return undef if reads nothing
@@ -95,7 +111,7 @@ sub slurp_statement
 	my $statement='';
 	while(my $line=shift(@$refstatement))
 	{
-		$statement.=$line;
+		$statement.="\n".$line;
 	}
 	$statement=~ s/;$//s;
 
@@ -334,6 +350,14 @@ sub parse_dump
 		next if ($line =~ /^(CREATE|ALTER) STOGROUP/);
 		next if ($line =~ /^SET NLS_STRING_UNITS/);
 		next if ($line =~ /^ALTER TABLE.*VOLATILE CARDINALITY/);
+
+		# Special cases for some versions that split create indexes in two lines:
+
+		if ($line =~ /^CREATE (UNIQUE )?INDEX/ and not $line =~ /^CREATE (UNIQUE )?INDEX.*ON "/)
+		{
+			$line.=shift(@$refstatement);
+		}
+
 		if ($line =~ /^CREATE (?:REGULAR|LARGE|(?:USER )?TEMPORARY) TABLESPACE "(.*?)\s*"/)
 		{
 			# Parse tablespace
@@ -398,49 +422,46 @@ sub parse_dump
 			}
 			die ("Overflow in create schema: " . join('',@$refstatement)) unless ($#$refstatement == -1);
 		}
-		elsif ($line =~ /^CREATE SEQUENCE "(.*?)\s*"\."(.*?)\s*" AS INTEGER\s*$/)
+		elsif ($line =~ /^CREATE SEQUENCE "(.*?)\s*"\."(.*?)\s*" AS INTEGER/)
 		{
+			# CREATE SEQUENCE are sometimes multi-line. weird. Anyway, put everything in a single line and salvage what we can :)
 			my $schema=$1;
 			my $sequence=$2;
-			while (my $line=shift(@$refstatement))
+
+			while (my $tmpline=shift(@$refstatement))
 			{
-				if ($line =~ /MINVALUE (\d+) MAXVALUE (\d+)/)
+				$line.=$tmpline;
+			}
+			# Extract what we can from the sequence
+			if ($line =~ /MINVALUE (\d+) MAXVALUE (\d+)/)
+			{
+				$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{MINVALUE}=$1;
+				$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{MAXVALUE}=$2;
+			}
+			if ($line =~ /START WITH (\d+) INCREMENT BY (\d+)/)
+			{
+				$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{STARTWITH}=$1;
+				$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{INCREMENTBY}=$2;
+			}
+
+			if ($line =~ /(NO )?\s*CACHE\s*(\d+)?/ )
+			{
+				if ( defined($1) )
 				{
-					$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{MINVALUE}=$1;
-					$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{MAXVALUE}=$2;
-				}
-				elsif ($line =~ /START WITH (\d+) INCREMENT BY (\d+)/)
-				{
-					$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{STARTWITH}=$1;
-					$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{INCREMENTBY}=$2;
-				}
-				#elsif ($line =~ /(NO )?CACHE (\d+)?(NO )?CYCLE/)
-				elsif ($line =~ /(CACHE.*CYCLE)/)
-				{
-					if ($line =~ /(NO )?\s*CACHE\s*(\d+)?/ )
-					{
-						if ( defined($1) )
-						{
-							$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CACHE}=0;
-						}
-						else
-						{
-							$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CACHE}=$2;
-						}
-					}
-					if ($line =~ /NO CYCLE/ )
-					{
-						$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CYCLE}=0;
-					}
-					else
-					{
-						$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CYCLE}=1;
-					}
+					$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CACHE}=1;
 				}
 				else
 				{
-					die "I don't understand $line in a CREATE SEQUENCE section";
+					$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CACHE}=$2;
 				}
+			}
+			if ($line =~ /NO CYCLE/ )
+			{
+				$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CYCLE}=0;
+			}
+			else
+			{
+				$schema_db2->{SCHEMAS}->{$schema}->{SEQUENCES}->{$sequence}->{CYCLE}=1;
 			}
 		} #CREATE SEQUENCE
 		elsif ($line =~ /^ALTER SEQUENCE "(.*?)\s*"\."(.*?)\s*" RESTART WITH (\d+)\s*$/)
@@ -458,7 +479,7 @@ sub parse_dump
 			while (my $line=shift(@$refstatement))
 			{
 				$colnum++;
-				if ($line =~ /^\s+"(.*?)\s*"\s+(.+?)( NOT NULL)?(?: WITH DEFAULT (.*?)| GENERATED (BY DEFAULT|ALWAYS) AS IDENTITY \(| GENERATED (BY DEFAULT|ALWAYS) AS \((.*?)\))?( ,| \))?\s*$/)
+				if ($line =~ /^\s+"(.*?)\s*"\s+(.+?)( NOT NULL)?(?: (?:WITH )?DEFAULT (.*?)| GENERATED (BY DEFAULT|ALWAYS) AS IDENTITY \(| GENERATED (BY DEFAULT|ALWAYS) AS \((.*?)\))?(\s?,| \))?\s*$/)
 				{
 					my ($colname,$coltype,$colnotnull,$coldefault,$colgeneratedbydefaultidentity,$colgeneratedbydefaultexpression,$colgeneratedbydefaultexpressionAS,$endofline)=($1,$2,$3,$4,$5,$6,$7,$8);
 					$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{COLS}->{$colname}->{TYPE}=convert_type($coltype);
@@ -551,6 +572,10 @@ sub parse_dump
 						print STDERR "==>Warning: column $colname of table $schema.$table has a default value using an expression. This may not work... you may have to correct this manually, and write a trigger<==\n";
 					}
 				}
+				elsif ($incols and $line =~ /^\s*\)\s*$/)
+				{
+					$incols=0;
+				}
 				elsif ($line =~ /^\s*(?:IN "(.*?)\s*")? *(?:INDEX IN "(.*?)\s*")? *(?:LONG IN "(.*?)\s*")?\s*;?\s*$/)
 				{
 						$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{TBSTABLE}=$1 if (defined $1);
@@ -569,18 +594,35 @@ sub parse_dump
 				{
 					next;
 				}
+				elsif ($line =~ /^\s*DATA CAPTURE NONE\s*$/)
+				{
+					next;
+				}
 				else
 				{
 					die "I don't understand $line in a CREATE TABLE section";
 				}
 			}
 		} # CREATE TABLE
-		elsif ($line =~ /^ALTER TABLE "(.*?)\s*"\."(.*?)\s*"\s*$/)
+		elsif ($line =~ /^ALTER TABLE .* PCTFREE \d+/)
+		{
+			# No point in keeping this. It exists in PG too, but the reasoning in setting it is entirely different.
+			next;
+
+		}
+		elsif ($line =~ /^ALTER TABLE "(.*?)\s*"\."(.*?)\s*" ALTER COLUMN "(.*?)\s*" RESTART WITH (\d+)\s*$/)
+		{
+			$schema_db2->{SCHEMAS}->{$1}->{TABLES}->{$2}->{COLS}->{$3}->{IDENTITY}->{STARTWITH}=$4;
+		}
+		elsif ($line =~ /^ALTER TABLE "(.*?)\s*"\."(.*?)\s*"\s*(\bADD\b.*)?/)
 		{
 			my $schema=$1;
 			my $table=$2;
-			my $line=shift(@$refstatement);
-			if ($line=~/^\s+ADD(?: CONSTRAINT "(.*?)\s*"\s*)? (PRIMARY KEY|UNIQUE)\s*$/)
+			unless ($3) # Usually it is multiline. Sometimes not
+			{
+				$line.=shift(@$refstatement);
+			}
+			if ($line=~/\bADD(?: CONSTRAINT "(.*?)\s*"\s*)? (PRIMARY KEY|UNIQUE)\s*$/)
 			{
 				my %object;
 				my $type=$2;
@@ -610,7 +652,7 @@ sub parse_dump
 					push @{$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{CONSTRAINTS}},(\%object);
 				}
 			} # Primary/Unique
-			elsif ($line=~/^\s+ADD(?: CONSTRAINT "(.*?)\s*"\s*)? FOREIGN KEY\s+$/)
+			elsif ($line=~/\bADD(?: CONSTRAINT "(.*?)\s*"\s*)? FOREIGN KEY\s*$/)
 			{
 				my %object;
 				$object{TYPE}='FK';
@@ -682,7 +724,7 @@ sub parse_dump
 				# We got there, the whole FK is parsed. Store it
 				push @{$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{CONSTRAINTS}},(\%object);
 			} # FK
-			elsif ($line=~/^\s+ADD(?: CONSTRAINT (\S+))? CHECK\s+$/)
+			elsif ($line=~/\bADD(?: CONSTRAINT (\S+))? CHECK\s+$/)
 			{
 				# Next lines is the declaration of the constraint, until we reach ENFORCED
 				my %object;
@@ -715,17 +757,7 @@ sub parse_dump
 				die "I don't understand $line in an ALTER TABLE section";
 			}
 		} # ALTER TABLE
-		elsif ($line =~ /^ALTER TABLE .* PCTFREE \d+/)
-		{
-			# No point in keeping this. It exists in PG too, but the reasoning in setting it is entirely different.
-			next;
-
-		}
-		elsif ($line =~ /^ALTER TABLE "(.*?)\s*"\."(.*?)\s*" ALTER COLUMN "(.*?)\s*" RESTART WITH (\d+)\s*$/)
-		{
-			$schema_db2->{SCHEMAS}->{$1}->{TABLES}->{$2}->{COLS}->{$3}->{IDENTITY}->{STARTWITH}=$4;
-		}
-		elsif ($line =~ /^CREATE (UNIQUE )?INDEX "(.*?)\s*"\."(.*?)\s*" ON "(.*?)\s*"\."(.*?)\s*"\s*$/)
+		elsif ($line =~ /^CREATE (UNIQUE )?INDEX "(.*?)\s*"\."(.*?)\s*"\s+ON "(.*?)\s*"\."(.*?)\s*"\s*$/)
 		{
 			my ($indexschema,$indexname,$tableschema,$tablename)=($2,$3,$4,$5);
 			# We ignore indexschema… it doesn't exist in PostgreSQl anyway
@@ -783,6 +815,14 @@ sub parse_dump
 			elsif ($line =~ /^\s*COMPRESS\s+(NO|YES)/)
 			{
 				next;
+			}
+			elsif ($line =~ /MINPCTUSED/)
+			{
+				next;
+			}
+			elsif ($line =~ /PCTFREE (\d+)/)
+			{
+				next; # Different engine, constraints won't be the same anyway
 			}
 			elsif ($line =~ /^$/) # Sometimes happens
 			{
@@ -900,7 +940,7 @@ sub parse_dump
 			$schema_db2->{SCHEMAS}->{$1}->{TRIGGERS}->{$2}->{COMMENT}=$3 . "\n" . slurp_comment($refstatement);
 			chomp $schema_db2->{SCHEMAS}->{$1}->{TRIGGERS}->{$2}->{COMMENT};
 		}
-		elsif ($line =~ /^CREATE FUNCTION (\S+)\.(\S+)/)
+		elsif ($line =~ /^CREATE(?: OR REPLACE)? (FUNCTION|PROCEDURE) (\S+)\.(\S+)/)
 		{
 			# These are functions. Languages are completely different
 			my $schema=$1;

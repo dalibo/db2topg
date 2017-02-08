@@ -250,6 +250,8 @@ sub try_fix_expression
 	# Type conversions
 	$data =~ s/\bCHAR\(/to_char(/gi;
 
+	$data =~ s/(\d{4}-\d{2}-\d{2})-(\d{2}).(\d{2}).(\d{2}).(\d{6})/$1 $2:$3:$4.$5/;
+
 	# for an empty blob:
 	if ($data =~ /"SYSIBM"."BLOB"/)
 	{
@@ -405,20 +407,17 @@ sub parse_dump
 			$schema_db2->{ROLES}->{$1}->{COMMENT}=$2 . "\n" . slurp_comment($refstatement);
 			chomp $schema_db2->{ROLES}->{$1}->{COMMENT};
 		}
-		elsif ($line =~ /^CREATE SCHEMA "(.*?)\s*"\s*$/)
+		elsif ($line =~ /^CREATE SCHEMA "\s*(\S*)\s*"\s*(AUTHORIZATION\s+"\s*(\S*)\s*")?\s*$/)
 		{
-			$schema_db2->{SCHEMAS}->{$1}=undef; #Nothing to store, but still has to be created
+			if (defined ($2) and defined($3)) {
+				$schema_db2->{SCHEMAS}->{$1}->{AUTHORIZATION}=$3;
 
-		}
-		elsif ($line =~ /^CREATE SCHEMA "(.*?)\s*"\s+AUTHORIZATION\s+"(.*)\s*"\s*$/)
-		{
-			print STDERR "MATCHED CREATE SCHEMA\n";
-			$schema_db2->{SCHEMAS}->{$1}->{AUTHORIZATION}=$2;
 			# Some roles may be there, and not have been created. I don't know why db2 would do this, but take care of it…
-			unless (exists $schema_db2->{ROLES}->{$2})
-			{
-				my %empty_hash=();
-				$schema_db2->{ROLES}->{$2}=\%empty_hash;
+				unless (exists $schema_db2->{ROLES}->{$3})
+				{
+					my %empty_hash=();
+					$schema_db2->{ROLES}->{$3}=\%empty_hash;
+				}
 			}
 			die ("Overflow in create schema: " . join('',@$refstatement)) unless ($#$refstatement == -1);
 		}
@@ -539,12 +538,12 @@ sub parse_dump
 							{
 								$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{COLS}->{$colname}->{IDENTITY}->{CYCLE}=0;
 							}
-							if (defined ($6))
+							if (defined ($6) or not defined ($7))
 							{
 								# No cache… means cache=1 under PostgreSQL
 								$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{COLS}->{$colname}->{IDENTITY}->{CACHE}=1;
 							}
-							if (defined ($7))
+							elsif (defined ($7))
 							{
 								$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{COLS}->{$colname}->{IDENTITY}->{CACHE}=$7;
 							}
@@ -969,6 +968,12 @@ sub parse_dump
 			# The privilege system is too different. Just ignore it
 			next;
 		}
+		elsif ($line =~ /^CREATE FUNCTION EXPLAIN_GET_MSGS/){
+			next while ( $line !~ ";" );
+		}
+		elsif ($line =~ /^CREATE TRUSTED/){
+			next while ( $line !~ ";" );
+		}
 		else
 		{
 			die "I don't understand <$line>";
@@ -1056,7 +1061,9 @@ sub produce_schema_files
 			# there is no create schema in it. Don't know why it happens though (and don't care :) )
 			$authorization = " AUTHORIZATION " . $schema_db2->{SCHEMAS}->{$schema}->{AUTHORIZATION};
 		}
-		print BEFORE "CREATE SCHEMA " . protect_reserved_keywords($schema) . $authorization . ";\n\n";
+		unless ($schema eq ''){
+			print BEFORE "CREATE SCHEMA " . protect_reserved_keywords($schema) . $authorization . ";\n\n";
+		}
 	}
 
 	# Do the create sequences
@@ -1068,10 +1075,12 @@ sub produce_schema_files
 
 			my $seqname=check_and_rename($schema,$sequence,'SEQUENCE');
 
+			my $cachecount = defined $sobj->{CACHE} ? $sobj->{CACHE} :  1;
+
 			print BEFORE "CREATE SEQUENCE " , protect_reserved_keywords($schema),".", protect_reserved_keywords($seqname),
 						" INCREMENT BY " , $sobj->{INCREMENTBY} , "\n",
 						" MINVALUE " , $sobj->{MINVALUE} , " MAXVALUE " , $sobj->{MAXVALUE} , "\n",
-						" START " , $sobj->{STARTWITH} , " CACHE " , $sobj->{CACHE} , "\n", ' ',
+						" START " , $sobj->{STARTWITH} , " CACHE " , $cachecount, "\n", ' ',
 						$sobj->{CYCLE}?'':'NO' , " CYCLE;\n";
 			if (exists $sobj->{RESTARTWITH})
 			{
@@ -1361,7 +1370,7 @@ sub produce_schema_files
 		foreach my $function (keys %{$schema_db2->{SCHEMAS}->{$schema}->{FUNCTIONS}})
 		{
 			my $funcobj=$schema_db2->{SCHEMAS}->{$schema}->{FUNCTIONS}->{$function};
-			print UNSURE "CREATE FUNCTION ", protect_reserved_keywords($function),
+			print UNSURE "CREATE OR REPLACE FUNCTION ", protect_reserved_keywords($function),
 							" AS\n\$func\$\n",
 							$funcobj->{STATEMENT},"\n\$func\$\n;\n";
 		}
@@ -1376,7 +1385,7 @@ sub produce_schema_files
 		foreach my $trigger (keys %{$schema_db2->{SCHEMAS}->{$schema}->{TRIGGERS}})
 		{
 			my $trigobj=$schema_db2->{SCHEMAS}->{$schema}->{TRIGGERS}->{$trigger};
-			print UNSURE "CREATE FUNCTION ", protect_reserved_keywords($trigger . '_fn'),
+			print UNSURE "CREATE OR REPLACE FUNCTION ", protect_reserved_keywords($trigger . '_fn'),
 							" LANGUAGE plpgsql RETURNS (trigger) AS\n\$func\$\n",
 							$trigobj->{STATEMENT},"\n\$func\$\n;\n";
 			#FIXME: Should create the trigger, but that's not possible, as the function will fail

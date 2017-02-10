@@ -28,6 +28,7 @@ my %tabledesc;
 my $data_directory;
 my $help;
 my $onlytable;
+my $dbencoding="utf8";
 my $parallelism=1;
 my $outcommand;
 
@@ -105,7 +106,7 @@ sub read_from_csv
 		
 	my $csv = Text::CSV_XS->new ({ binary => 1, auto_diag => 1 });
 
-	open my $fh_in, "<:encoding(utf8)", $filename_in or die "cannot open $filename_in for reading: $!";
+	open my $fh_in, "<:encoding(".$dbencoding.")", $filename_in or die "cannot open $filename_in for reading: $!";
 	
 	# Put the whole thing in a transaction. It will produce no journal if database isn't archiving
 	print $fh_out "BEGIN;\n";
@@ -300,6 +301,7 @@ sub usage
 	" [-j parallel_jobs]\n",
 	" [-o command_to_pipe_to]\n",
 	" [-t table (SCHEMA.TABLE)]\n",
+	" [ -e encoding of source database]\n", 
 	" Parallel jobs work on several tables. There is no point in doing this with -t\n";
 	             
 	die "FAIL";
@@ -310,6 +312,7 @@ my $options = GetOptions("d=s"	  => \$data_directory,
 						 "j=i"	  => \$parallelism,
 						 "o=s"	  => \$outcommand,
 						 "t=s"	  => \$onlytable,
+						 "e=s"	  => \$dbencoding,
                          );
 
 unless (defined $data_directory)

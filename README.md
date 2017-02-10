@@ -59,7 +59,9 @@ Now, you can convert and inject all these into PostgreSQL, using the deltocopy.p
 
 deltocopy produces all the COPY statements to load data into PostgreSQL to its stdout. You may add a -e option to specify encoding.
 
-To get the full list of supported encodings in Perl: ``perl -e 'use Encode; print join("\n",Encode->encodings(":all"));'``
+To get the full list of supported encodings in Perl:
+
+``perl -e 'use Encode; print join("\n",Encode->encodings(":all"));'``
 
 If you are in a hurry, and your server can bear it, there is a parallel mode. I advise you to only use it when you have validated that everything is ok at least once:
 

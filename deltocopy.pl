@@ -143,7 +143,7 @@ sub read_from_csv
 		}
 		$colnull[$i]=$tabledesc{$schema}->{$table}->[$i]->{NULL};
 	}
-	
+	my $corrected_nulls=0;	
 	while (my $row = $csv->getline ($fh_in)) {
 		my $outrow='';
 		my $rownum=$#$row;
@@ -204,6 +204,8 @@ sub read_from_csv
 				$field =~ s/\t/\\t/g;
 				$field =~ s/\n/\\n/g;
 				$field =~ s/\r/\\r/g;
+				my $tmp_corrected_nulls=($field =~ tr/\000//d);
+				$corrected_nulls+=$tmp_corrected_nulls;
 				
 			}
 			$outrow.= $field;
@@ -220,6 +222,10 @@ sub read_from_csv
 	}
 	# Close all the filehandles to lob files
 	%lobs_filehandles=();
+	if ($corrected_nulls)
+	{
+		print STDERR "Warning: I had to remove $corrected_nulls null characters from $schema.$table\n";
+	}
 }
 
 sub load_tabledesc

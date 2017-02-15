@@ -129,11 +129,11 @@ sub read_from_csv
 		{
 			$coltype[$i]=2;
 		}
-		elsif ($type eq 'TIMESTAMP')
+		elsif ($type =~ /^TIMESTAMP/)
 		{
 			$coltype[$i]=3;
 		}
-		elsif ($type eq 'TIME')
+		elsif ($type =~ /^TIME/)
 		{
 			$coltype[$i]=4;
 		}

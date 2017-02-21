@@ -45,7 +45,7 @@ So for now, you can run the before.sql, something like:
 
 You should add your connection parameters to this command. You can also use or not the ON_ERROR_STOP and --single-transaction parameters, depending on wether you want the script to stop on error, and cancel everything. This remark holds true for all following psql commands
 
-Now, if you need, you can use the export.db2 script (on the DB2 server, or a machine with the db2 command line tool, set-up to access the server). Your user will need SELECT access to all the tables, and permission to EXECUTE NULLID.SQLUBH05. Put this script on this machine, and run it this way (replace /path/to/ with the real path, or better yet, put the db2 executable in your path)
+Now, if you need, you can use the export.db2 script (it should have been created in my_output_dir), on the DB2 server, or a machine with the db2 command line tool, set-up to access the server. Your user will need SELECT access to all the tables, and permission to EXECUTE NULLID.SQLUBH05. Put this script on this machine, and run it this way (replace /path/to/ with the real path, or better yet, put the db2 executable in your path)
 
 ``/path/to/db2 -f export.db2``
 

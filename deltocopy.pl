@@ -267,6 +267,14 @@ sub do_all_tables
 	{
 		foreach my $table (sort(keys %{$tabledesc{$schema}}))
 		{
+			
+			if ($^O =  "MSWin32") {
+				# No fork for Windows
+				print STDERR "Starting work on $schema.$table\n";
+				read_from_csv($schema,$table);
+				next;
+			}
+			
 			if ($running>=$parallelism)
 			{
 				my $deadchild;

@@ -150,15 +150,19 @@ sub find_default_default
 	{
 		return 'current_date';
 	}
-	if ($type =~ /^TIME/i)
+	if ($type =~ /^TIME\b/i)
 	{
 		return 'current_time';
 	}
-	if ($type =~ /^TIMESTAMP/i)
+	if ($type =~ /^TIMESTAMP\b/i)
 	{
 		return 'current_timestamp';
 	}
-	die "Unknown type $type when trying to find 'default' default value for a type\n";
+	if ($type =~ /^bytea/i)
+	{
+		return "''";
+	}
+	croak "Unknown type $type when trying to find 'default' default value for a type\n";
 }
 
 # Convert DB2's peculiar types to PostgreSQL
@@ -173,7 +177,15 @@ sub convert_type
 	}
 	elsif ($in_type =~ /^CLOB\((\d+)\)/)
 	{
-		$out_type="varchar($1)"; # That's just a varchar to us, as these can store up to 1GB
+		if ($1 < 10485760)
+		{
+			$out_type="varchar($1)"; # That's just a varchar to us, as these can store up to 1GB
+		}
+		else
+		{
+			$out_type="varchar";
+		}
+
 	}
 	elsif ($in_type eq 'DOUBLE')
 	{
@@ -182,6 +194,12 @@ sub convert_type
 	elsif ($in_type eq 'LONG VARCHAR')
 	{
 		$out_type='text';
+	}
+	elsif ($in_type =~ /FOR BIT DATA/)
+	{
+		# No meaning in PG
+		$in_type =~ s/FOR BIT DATA//;
+		$out_type=$in_type;
 	}
 	return $out_type;
 }
@@ -234,9 +252,10 @@ sub protect_reserved_keywords
 
 # Try to fix some expressions (for default values for example)
 # Only does brutal regexp corrections
+# Try to be subtle when type is known (for default values for types)
 sub try_fix_expression
 {
-	my ($data)=@_;
+	my ($data,$type)=@_;
 	# get rid of newlines, anyway we just want to import the objects (views), they will be reformatted by PG anyway
 	$data =~ s/\r?\n/ /g;
 	# Date retrieval
@@ -251,6 +270,12 @@ sub try_fix_expression
 	$data =~ s/\bCHAR\(/to_char(/gi;
 
 	$data =~ s/(\d{4}-\d{2}-\d{2})-(\d{2}).(\d{2}).(\d{2}).(\d{6})/$1 $2:$3:$4.$5/;
+
+	if ($type =~ /\bTIME\b/)
+	{
+		# This is time. In postgresql, time values are separated by :, not .
+		$data =~ s/\b(\d{2})\.(\d{2})\.(\d{2})\b/$1:$2:$3/;
+	}
 
 	# for an empty blob:
 	if ($data =~ /"SYSIBM"."BLOB"/)
@@ -311,6 +336,21 @@ sub check_and_rename
 	print STDERR "I had to rename the $type $schema.$name to $schema.${name}${id} to avoid conflict\n";
 
 	return $name.$id;
+}
+
+# In the main structure, indexes are attached to a table. We don't have a direct access to them
+# It's a problem in one case: when parsing comment on index
+# This function returns the tablename owning this index
+sub find_index_in_schema
+{
+	my ($schema,$searched_index)=@_;
+	foreach my $table (keys %{$schema_db2->{SCHEMAS}->{$schema}->{TABLES}})
+	{
+		foreach my $index(keys %{$schema_db2->{SCHEMAS}->{$schema}->{TABLES}->{$table}->{INDEXES}})
+		{
+			return $table if ($index eq $searched_index);
+		}
+	}
 }
 
 
@@ -390,7 +430,7 @@ sub parse_dump
 						next;
 					}
 				}
-				next if ($line =~ /EXTENTSIZE|PAGESIZE|INITIALSIZE|PREFETCHSIZE|BUFFERPOOL|OVERHEAD|TRANSFERRATE|AUTORESIZE|INCREASESIZE|MAXSIZE|FILE SYSTEM CACHING|DROPPED TABLE/);
+				next if ($line =~ /EXTENTSIZE|PAGESIZE|INITIALSIZE|PREFETCHSIZE|BUFFERPOOL|OVERHEAD|TRANSFERRATE|AUTORESIZE|INCREASESIZE|MAXSIZE|FILE SYSTEM CACHING|DROPPED TABLE|USING STOGROUP|DATA TAG/);
 				die "I don't understand $line in a CREATE TABLESPACE section";
 			}
 		} #CREATE TABLESPACE
@@ -421,9 +461,10 @@ sub parse_dump
 			}
 			die ("Overflow in create schema: " . join('',@$refstatement)) unless ($#$refstatement == -1);
 		}
-		elsif ($line =~ /^CREATE SEQUENCE "(.*?)\s*"\."(.*?)\s*" AS INTEGER/)
+		elsif ($line =~ /^CREATE SEQUENCE "(.*?)\s*"\."(.*?)\s*" AS (INTEGER|BIGINT)/)
 		{
 			# CREATE SEQUENCE are sometimes multi-line. weird. Anyway, put everything in a single line and salvage what we can :)
+			# We don't care about integer/bigint. All sequences are bigint in PG
 			my $schema=$1;
 			my $sequence=$2;
 
@@ -587,6 +628,18 @@ sub parse_dump
 				}
 				elsif ($line =~ /^\s*DISTRIBUTE BY/)
 				{
+					if ($line =~ /\(/)
+					{
+						# This distribute has a list of arguments (distribute by hash probably)
+						if ($line !~ /\(.*\)/)
+						{
+							# The closing parenthesis isn't here. Ignore entries untill we get to it
+							while ($line !~ /\)/)
+							{
+								$line=shift(@$refstatement);
+							}
+						}
+					}
 					next;
 				}
 				elsif ($line =~ /^\s*COMPRESS (NO|YES)/)
@@ -695,7 +748,7 @@ sub parse_dump
 				}
 				while (my $line=shift(@$refstatement))
 				{
-					if ($line =~/^\s+(?:ON (DELETE|UPDATE) (RESTRICT|NO ACTION|CASCADE)|(ENFORCED)|(ENABLE QUERY OPTIMIZATION))\s*$/)
+					if ($line =~/^\s+(?:ON (DELETE|UPDATE) (RESTRICT|NO ACTION|CASCADE|SET NULL)|(ENFORCED)|(ENABLE QUERY OPTIMIZATION))\s*$/)
 					{
 						if (defined $3)
 						{
@@ -819,9 +872,10 @@ sub parse_dump
 			{
 				next;
 			}
-			elsif ($line =~ /PCTFREE (\d+)/)
+			elsif ($line =~ /^\s*(PCTFREE (\d+))?\s*(CLUSTER)?\s*$/)
 			{
-				next; # Different engine, constraints won't be the same anyway
+				print STDERR "$indexschema.$indexname is clustered. Clustered (or IOT) indexes aren't supported in PostgreSQL. Creating a normal index\n";
+				next; # Ignore PCTFREE
 			}
 			elsif ($line =~ /^$/) # Sometimes happens
 			{
@@ -861,6 +915,13 @@ sub parse_dump
 				$schema_db2->{SCHEMAS}->{$1}->{VIEWS}->{$2}->{COMMENT}=$3 . "\n" . slurp_comment($refstatement);
 				chomp $schema_db2->{SCHEMAS}->{$1}->{VIEWS}->{$2}->{COMMENT};
 			}
+		}
+		elsif ($line =~ /^COMMENT ON INDEX "(.*?)\s*"\."(.*?)\s*"\s* IS '(.*?)'?$/)
+		{
+			# Resolve the table associated with this index
+			my $table=find_index_in_schema($1,$2);
+			$schema_db2->{SCHEMAS}->{$1}->{TABLES}->{$table}->{INDEXES}->{$2}->{COMMENT}=$3 . "\n" . slurp_comment($refstatement);
+			chomp $schema_db2->{SCHEMAS}->{$1}->{TABLES}->{$table}->{INDEXES}->{$2}->{COMMENT};
 		}
 		elsif ($line =~ /CREATE DISTINCT TYPE "(.*?)\s*"."(.*?)\s*" AS "SYSIBM  ".(.*)/)
 		{
@@ -939,10 +1000,19 @@ sub parse_dump
 			$schema_db2->{SCHEMAS}->{$1}->{TRIGGERS}->{$2}->{COMMENT}=$3 . "\n" . slurp_comment($refstatement);
 			chomp $schema_db2->{SCHEMAS}->{$1}->{TRIGGERS}->{$2}->{COMMENT};
 		}
-		elsif ($line =~ /^CREATE(?: OR REPLACE)? (FUNCTION|PROCEDURE) (\S+)\.(\S+)/)
+		elsif ($line =~ /^CREATE(?: OR REPLACE)? (?:FUNCTION|PROCEDURE) (?:(\S+)\.)?(\S+)/)
 		{
 			# These are functions. Languages are completely different
-			my $schema=$1;
+			my $schema;
+			if (defined $1)
+			{
+				$schema=$1;
+			}
+			else
+			{
+				# If no schema has been set, put it in current schema
+				$schema=$current_schema;
+			}
 			my $function=$2;
 			# There can be quotes and whatever in these, depending on how the person has created the function
 			$schema =~ s/^"//;
@@ -968,11 +1038,25 @@ sub parse_dump
 			# The privilege system is too different. Just ignore it
 			next;
 		}
+		elsif ($line =~ /^CREATE (?:PUBLIC )?ALIAS (.*) FOR SEQUENCE (.*)/)
+		{
+			print STDERR "==> Alias from sequence $1 to sequence $2 not migrated. Use search_path in PostgreSQL\n";
+		}
 		elsif ($line =~ /^CREATE FUNCTION EXPLAIN_GET_MSGS/){
 			next while ( $line !~ ";" );
 		}
 		elsif ($line =~ /^CREATE TRUSTED/){
 			next while ( $line !~ ";" );
+		}
+		elsif ($line =~ /^CREATE GLOBAL TEMPORARY TABLE (.*?)\s*\(/)
+		{
+			print STDERR "Ignoring global temporary table $1. There are only local temporary tables in PostgreSQL\n";
+			next;
+		}
+		elsif ($line =~ /^CREATE VARIABLE/)
+		{
+			# Doesn't exist in PG
+			next;
 		}
 		else
 		{
@@ -1004,7 +1088,7 @@ sub get_coldef
 		}
 		else
 		{
-			$rv .= ' DEFAULT ' . try_fix_expression($default);
+			$rv .= ' DEFAULT ' . try_fix_expression($default,$type);
 		}
 	}
 	return $rv;
@@ -1239,6 +1323,12 @@ sub produce_schema_files
 					# Just finish the statement
 					print AFTER ");\n";
 				}
+				# Do the comments on indexes
+				if (exists $iobj->{COMMENT})
+				{
+					print AFTER "COMMENT ON INDEX " . protect_reserved_keywords($schema) . "." .
+								protect_reserved_keywords($index) . " IS '" . $iobj->{COMMENT} . "';\n";
+				}
 			}
 		}
 	}
@@ -1346,7 +1436,7 @@ sub produce_schema_files
 		# We try to fix what we can
 		print UNSURE try_fix_expression($vobj->{STATEMENT}),";\n";
 	}
-	# Don't forget the comments on views. As it was easier, they aren't store in the same place (they are in the schema, not in a list)
+	# Don't forget the comments on views. As it was easier, they aren't stored in the same place (they are in the schema, not in a list)
 	foreach my $schema (keys(%{$schema_db2->{SCHEMAS}}))
 	{
 		foreach my $view (keys(%{$schema_db2->{SCHEMAS}->{$schema}->{VIEWS}}))

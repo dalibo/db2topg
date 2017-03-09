@@ -3,11 +3,11 @@
 #
 #         FILE: deltocopy.pl
 #
-#        USAGE: ./deltocopy.pl  
+#        USAGE: ./deltocopy.pl
 #
 #  DESCRIPTION: Convert a DB2 SQL data (DEL) dump of all tables to a PostgreSQL COPY dump
 #
-#       AUTHOR: Marc Cousin (), 
+#       AUTHOR: Marc Cousin (),
 #===============================================================================
 
 use strict;
@@ -40,13 +40,13 @@ sub get_lob
 		# That's the way DB2 presents null lobs… length of -1
 		return '\N';
 	}
-	
+
 	if ($isblob)
 	{
 		# Header for an hex-escaped LOB
 		print $fh_out '\\\\x';
 	}
-	
+
 	# We open BLOBS in raw, CLOBS in utf8. So we may have 2 different descriptors for the same file, I don't know what DB2 might do
 	unless (exists $lobs_filehandles{$filename})
 	{
@@ -54,7 +54,7 @@ sub get_lob
 		$lobs_filehandles{$filename}=$fh;
 	}
 	my $fh=$lobs_filehandles{$filename};
-	
+
 	seek $fh,$start,0; # O means it is an absolute position
 	# Ok, read what we have to
 	while ($to_read >0)
@@ -77,7 +77,7 @@ sub get_lob
 			$data =~ s/\n/\\n/g;
 			$data =~ s/\r/\\r/g;
 
-			
+
 			print $fh_out $data;
 		}
 	}
@@ -102,18 +102,18 @@ sub read_from_csv
 		$fh_out=*STDOUT;
 	}
 	binmode($fh_out, ":utf8");
-	
-		
+
+
 	my $csv = Text::CSV_XS->new ({ binary => 1, auto_diag => 1 });
 
 	open my $fh_in, "<:encoding(".$dbencoding.")", $filename_in or die "cannot open $filename_in for reading: $!";
-	
+
 	# Put the whole thing in a transaction. It will produce no journal if database isn't archiving
 	print $fh_out "BEGIN;\n";
 	print $fh_out "TRUNCATE $schema\.$table;\n";
 	print $fh_out "SET client_encoding = 'UTF8';\n";
 	print $fh_out "COPY $schema\.$table FROM STDIN;\n";
-	
+
 	# Prepare a memory structure to determine faster the type of a column
 	# 1: CLOB, 2: BLOB, 3: Timestapm, 100: Whatever (add values if necessary)
 	my @coltype;
@@ -143,7 +143,7 @@ sub read_from_csv
 		}
 		$colnull[$i]=$tabledesc{$schema}->{$table}->[$i]->{NULL};
 	}
-	my $corrected_nulls=0;	
+	my $corrected_nulls=0;
 	while (my $row = $csv->getline ($fh_in)) {
 		my $outrow='';
 		my $rownum=$#$row;
@@ -170,14 +170,14 @@ sub read_from_csv
 				# Print what we have in outrow and clean it. We will output the LOB piece by piece
 				print $fh_out $outrow;
 				$outrow='';
-				
-				
+
+
 				# FIXME: compile it once per file ?
 				$field =~ /^($basename_in\.\d+\.lob)\.(\d+)\.(\d+)\/$/ or die "Cannot understand LOB format";
 				{
 					# There is a LOB in this… we need to fetch it from another file, and escape it postgresql-style
 					# We have to check if this is a CLOB (just include it), or a BLOB (protect it with escaping)
-					
+
 					if ( $fieldtype == 1) # CLOB
 					{
 						get_lob($dirname_in.'/'.$1,$2,$3,$fh_out,0);
@@ -206,7 +206,7 @@ sub read_from_csv
 				$field =~ s/\r/\\r/g;
 				my $tmp_corrected_nulls=($field =~ tr/\000//d);
 				$corrected_nulls+=$tmp_corrected_nulls;
-				
+
 			}
 			$outrow.= $field;
 		}
@@ -267,14 +267,14 @@ sub do_all_tables
 	{
 		foreach my $table (sort(keys %{$tabledesc{$schema}}))
 		{
-			
-			if ($^O =  "MSWin32") {
+
+			if ($^O =~  "MSWin32") {
 				# No fork for Windows
 				print STDERR "Starting work on $schema.$table\n";
 				read_from_csv($schema,$table);
 				next;
 			}
-			
+
 			if ($running>=$parallelism)
 			{
 				my $deadchild;
@@ -297,7 +297,7 @@ sub do_all_tables
 				read_from_csv($schema,$table);
 				exit;
 			}
-			
+
 		}
 	}
 	while ($running >0)
@@ -315,9 +315,9 @@ sub usage
 	" [-j parallel_jobs]\n",
 	" [-o command_to_pipe_to]\n",
 	" [-t table (SCHEMA.TABLE)]\n",
-	" [ -e encoding of source database]\n", 
+	" [ -e encoding of source database]\n",
 	" Parallel jobs work on several tables. There is no point in doing this with -t\n";
-	             
+
 	die "FAIL";
 }
 

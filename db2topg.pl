@@ -923,6 +923,15 @@ sub parse_dump
 			$schema_db2->{SCHEMAS}->{$1}->{TABLES}->{$table}->{INDEXES}->{$2}->{COMMENT}=$3 . "\n" . slurp_comment($refstatement);
 			chomp $schema_db2->{SCHEMAS}->{$1}->{TABLES}->{$table}->{INDEXES}->{$2}->{COMMENT};
 		}
+		elsif ($line =~ /^COMMENT ON VIEW "(.*?)\s*"\."(.*?)\s*"\s* IS '(.*?)'?$/)
+		{
+			# Resolve the table associated with this index
+			$schema_db2->{SCHEMAS}->{$1}->{VIEWS}->{$2}->{COMMENT}=$3 . "\n" . slurp_comment($refstatement);
+		}
+		elsif ($line =~ /^COMMENT ON SCHEMA "(.*?)\s*" IS '(.*?)'?$/)
+		{
+			$schema_db2->{SCHEMAS}->{$1}->{COMMENT} = $2 ."\n" . slurp_comment($refstatement); 
+		}
 		elsif ($line =~ /CREATE DISTINCT TYPE "(.*?)\s*"."(.*?)\s*" AS "SYSIBM  ".(.*)/)
 		{
 			# Only manage this case for now: this isn't a type, it's a domain
@@ -1152,6 +1161,10 @@ sub produce_schema_files
 		}
 		unless ($schema eq ''){
 			print BEFORE "CREATE SCHEMA " . protect_reserved_keywords($schema) . $authorization . ";\n\n";
+		}
+		if ( exists $schema_db2->{SCHEMAS}->{$schema}->{COMMENT})
+		{
+			print BEFORE "COMMENT ON SCHEMA $schema IS '". $schema_db2->{SCHEMAS}->{$schema}->{COMMENT} . "';\n";
 		}
 	}
 
@@ -1485,6 +1498,10 @@ sub produce_schema_files
 							$trigobj->{STATEMENT},"\n\$func\$\n;\n";
 			#FIXME: Should create the trigger, but that's not possible, as the function will fail
 			print UNSURE "-- Add the CREATE TRIGGER too!\n\n\n";
+			if ( exists $trigobj->{COMMENT})
+			{
+				print UNSURE "COMMENT ON $trigger IS '". $trigobj->{COMMENT} . "';\n"; 
+			}
 		}
 	}
 

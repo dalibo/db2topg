@@ -90,7 +90,7 @@ sub read_from_csv
 	my ($schema,$table)=@_;
 	my $basename_in=$schema . '.' . $table . '.del';
 	my $dirname_in=$data_directory;
-	my $filename_in=$dirname_in . '/' . $basename_in;
+	my $filename_in=get_del_file_path($schema,$table);
 	my $fh_out;
 	if (defined $outcommand)
 	{
@@ -267,11 +267,18 @@ sub do_all_tables
 	{
 		foreach my $table (sort(keys %{$tabledesc{$schema}}))
 		{
-
+			
 			if ($^O =~  "MSWin32") {
 				# No fork for Windows
-				print STDERR "Starting work on $schema.$table\n";
-				read_from_csv($schema,$table);
+				if (-f get_del_file_path($schema,$table))
+				{
+					print STDERR "Starting work on $schema.$table\n";
+					read_from_csv($schema,$table);
+				} 
+				else 
+				{
+					print STDERR "No file found for $schema.$table\n";
+				}
 				next;
 			}
 
@@ -305,6 +312,13 @@ sub do_all_tables
 		wait();
 		$running--;
 	}
+}
+
+sub get_del_file_path
+{
+	my ($schema,$table)=@_;
+	my $filename_path=$data_directory . '/' . $schema . '.' . $table . '.del';
+	return $filename_path;
 }
 
 sub usage

@@ -408,7 +408,7 @@ sub parse_dump
 			while (my $line=shift(@$refstatement))
 			{
 				# Read the rest of create tablespace
-				if ($line =~ /^\s*USING \((?:\s?FILE )?'(.*)'(?: \d+)?\s?(\)|,)/)
+				if ($line =~ /^\s*USING \((?:\s?FILE )?'(.*)'(?:\s?\d+)?\s?(\)|,)/)
 				{
 					push @{$schema_db2->{TABLESPACE}->{$name}->{PATH}},($1);
 					if ($2 eq ',')

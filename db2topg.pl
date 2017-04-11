@@ -271,10 +271,12 @@ sub try_fix_expression
 
 	$data =~ s/(\d{4}-\d{2}-\d{2})-(\d{2}).(\d{2}).(\d{2}).(\d{6})/$1 $2:$3:$4.$5/;
 
-	if ($type =~ /\bTIME\b/)
-	{
-		# This is time. In postgresql, time values are separated by :, not .
-		$data =~ s/\b(\d{2})\.(\d{2})\.(\d{2})\b/$1:$2:$3/;
+	if ( defined $type ) {
+		if ($type =~ /\bTIME\b/)
+		{
+			# This is time. In postgresql, time values are separated by :, not .
+			$data =~ s/\b(\d{2})\.(\d{2})\.(\d{2})\b/$1:$2:$3/;
+		}
 	}
 
 	# for an empty blob:
@@ -400,7 +402,7 @@ sub parse_dump
 			$line.=shift(@$refstatement);
 		}
 
-		if ($line =~ /^CREATE (?:REGULAR|LARGE|(?:USER )?TEMPORARY) TABLESPACE "(.*?)\s*"/)
+		if ($line =~ /^CREATE (?:REGULAR|LARGE|(?:USER )?TEMPORARY) TABLESPACE "?(.*?)\s?"?($|\s)/)
 		{
 			# Parse tablespace
 			my $name=$1;
@@ -930,7 +932,7 @@ sub parse_dump
 		}
 		elsif ($line =~ /^COMMENT ON SCHEMA "(.*?)\s*" IS '(.*?)'?$/)
 		{
-			$schema_db2->{SCHEMAS}->{$1}->{COMMENT} = $2 ."\n" . slurp_comment($refstatement); 
+			$schema_db2->{SCHEMAS}->{$1}->{COMMENT} = $2 ."\n" . slurp_comment($refstatement);
 		}
 		elsif ($line =~ /CREATE DISTINCT TYPE "(.*?)\s*"."(.*?)\s*" AS "SYSIBM  ".(.*)/)
 		{
@@ -1500,7 +1502,7 @@ sub produce_schema_files
 			print UNSURE "-- Add the CREATE TRIGGER too!\n\n\n";
 			if ( exists $trigobj->{COMMENT})
 			{
-				print UNSURE "COMMENT ON $trigger IS '". $trigobj->{COMMENT} . "';\n"; 
+				print UNSURE "COMMENT ON $trigger IS '". $trigobj->{COMMENT} . "';\n";
 			}
 		}
 	}

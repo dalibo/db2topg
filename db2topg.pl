@@ -1043,11 +1043,16 @@ sub parse_dump
 			print STDERR "==> Alias from sequence $1 to sequence $2 not migrated. Use search_path in PostgreSQL\n";
 		}
 		elsif ($line =~ /^CREATE FUNCTION EXPLAIN_GET_MSGS/){
-			next while ( $line !~ ";" );
+			next while ( $line !~ /;\s*$/ );
 		}
 		elsif ($line =~ /^CREATE TRUSTED/){
-			next while ( $line !~ ";" );
+			next while ( $line !~ /;\s*$/ );
 		}
+		elsif ($line =~ /^CREATE AUDIT POLICY/)
+		{
+            # db2topg doesn't support this. Just skip.
+            next while ($line !~ /;\s*$/);
+        }
 		elsif ($line =~ /^CREATE GLOBAL TEMPORARY TABLE (.*?)\s*\(/)
 		{
 			print STDERR "Ignoring global temporary table $1. There are only local temporary tables in PostgreSQL\n";

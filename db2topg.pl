@@ -201,6 +201,11 @@ sub convert_type
 		$in_type =~ s/FOR BIT DATA//;
 		$out_type=$in_type;
 	}
+	elsif ($in_type =~ /VARCHAR\s*\((\d+)\s+OCTETS\s*\)/)
+	{
+		# PostgreSQL always calculates strings in characters semantics, never bytes
+		$out_type = 'VARCHAR($1)';
+	}
 	return $out_type;
 }
 

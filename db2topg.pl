@@ -204,7 +204,7 @@ sub convert_type
 	elsif ($in_type =~ /VARCHAR\s*\((\d+)\s+(?:OCTETS|CODEUNITS16|CODEUNITS32)\s*\)/)
 	{
 		# PostgreSQL always calculates strings in characters semantics, never bytes
-		$out_type = 'VARCHAR($1)';
+		$out_type = "VARCHAR($1)";
 	}
 	return $out_type;
 }

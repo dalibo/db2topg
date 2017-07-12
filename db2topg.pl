@@ -54,7 +54,7 @@ sub read_statement
 		$read=1;
 		push @statement,($line);
 		# We have an exception for create functions: there will be semi-columns inside…
-		if ($statement[0] !~ /CREATE.*(FUNCTION|PROCEDURE)/i)
+		if ($statement[0] !~ /CREATE.*(FUNCTION|PROCEDURE|TRIGGER)/i)
 		{
 			last if ($line=~/;\s*$/);
 		}
@@ -63,7 +63,7 @@ sub read_statement
 			# There are functions containing SQL, others containing a sort of plpgsql
 			# If the function contains a begin atomic, lets suppose it's sort of plpgsql
 
-			if ( $line =~ /^(?:(.*): )?begin\s+atomic\s*/i)
+			if ( $line =~ /^(?:(.*): )?\s*begin\s+atomic\s*/i)
 			{
 				if (defined $1)
 				{

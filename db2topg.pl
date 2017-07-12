@@ -54,7 +54,7 @@ sub read_statement
 		$read=1;
 		push @statement,($line);
 		# We have an exception for create functions: there will be semi-columns inside…
-		if ($statement[0] !~ /CREATE.*(FUNCTION|PROCEDURE)/i)
+		if ($statement[0] !~ /CREATE.*(FUNCTION|PROCEDURE|TRIGGER)/i)
 		{
 			last if ($line=~/;\s*$/);
 		}

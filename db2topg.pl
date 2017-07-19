@@ -884,6 +884,14 @@ sub parse_dump
 				print STDERR "$indexschema.$indexname is clustered. Clustered (or IOT) indexes aren't supported in PostgreSQL. Creating a normal index\n";
 				next; # Ignore PCTFREE
 			}
+			elsif ($line =~ /^\s*INCLUDE NULL KEYS ALLOW REVERSE SCANS\s*$/)
+			{
+				next; # Ignore these: they are the default and can't be turned off anyway
+			}
+			elsif ($line =~ /^\s*COLLECT (SAMPLED )?(DETAILED )?STATISTICS\s*$/)
+			{
+				next; # Ignore these: they have no meaning in postgresql
+			}
 			elsif ($line =~ /^$/) # Sometimes happens
 			{
 				next;
@@ -944,7 +952,7 @@ sub parse_dump
 			# Only manage this case for now: this isn't a type, it's a domain
 			$schema_db2->{SCHEMAS}->{$1}->{DOMAINS}->{$2}->{BASETYPE}=convert_type($3);
 		}
-		elsif ($line =~ /^SET CURRENT SCHEMA = "(.*?)\s*"\s*$/)
+		elsif ($line =~ /^\s*SET CURRENT SCHEMA = "(.*?)\s*"\s*$/)
 		{
 			# Current schema. Probably for an incoming create view. Store it globally, we will add these info to the view
 			$current_schema=$1;

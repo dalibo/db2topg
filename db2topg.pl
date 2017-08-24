@@ -63,7 +63,7 @@ sub read_statement
 			# There are functions containing SQL, others containing a sort of plpgsql
 			# If the function contains a begin atomic, lets suppose it's sort of plpgsql
 
-			if ( $line =~ /^(?:(.*): )?\s*begin\s+atomic\s*/i)
+			if ( $line =~ /^(?:(.*): )?\s*begin(\s+atomic)\s*/i)
 			{
 				if (defined $1)
 				{
@@ -77,12 +77,12 @@ sub read_statement
 			if (not defined($marker) )
 			{
 				# Stop as soon as there is a semicolon
-				last if ($line=~/;\s*$/);
+				last if ($line=~/^\s*end\s*;\s*$/i);
 			}
 			else
 			{
 				# We stop when we have seen the "end" keyword, the optional marker and the semi colon after it
-				if ($line =~ /^\s*end${marker}\s*$/)
+				if ($line =~ /^\s*end${marker}\s*$/i)
 				{
 					$seen_end_function=1;
 				}
@@ -640,12 +640,21 @@ sub parse_dump
 						# This distribute has a list of arguments (distribute by hash probably)
 						if ($line !~ /\(.*\)/)
 						{
-							# The closing parenthesis isn't here. Ignore entries untill we get to it
+							# The closing parenthesis isn't here. Ignore entries until we get to it
 							while ($line !~ /\)/)
 							{
 								$line=shift(@$refstatement);
 							}
 						}
+					}
+					next;
+				}
+				elsif ($line =~ /^\s*ORGANIZE BY/)
+				{
+					# These end with double parenthesis with space...
+					while ($line !~ /\)\s*\)\s*$/)
+					{
+						$line=shift(@$refstatement);
 					}
 					next;
 				}
@@ -672,6 +681,10 @@ sub parse_dump
 		elsif ($line =~ /^ALTER TABLE "(.*?)\s*"\."(.*?)\s*" ALTER COLUMN "(.*?)\s*" RESTART WITH (\d+)\s*$/)
 		{
 			$schema_db2->{SCHEMAS}->{$1}->{TABLES}->{$2}->{COLS}->{$3}->{IDENTITY}->{STARTWITH}=$4;
+		}
+		elsif ($line =~ /^ALTER TABLE "(.*?)\s*"\."(.*?)\s*"\s* DEACTIVATE ROW ACCESS CONTROL$/)
+		{
+			next;# Just ignore
 		}
 		elsif ($line =~ /^ALTER TABLE "(.*?)\s*"\."(.*?)\s*"\s*(\bADD\b.*)?/)
 		{
@@ -896,6 +909,12 @@ sub parse_dump
 			{
 				next;
 			}
+			elsif ($line =~ /^\s*GENERATE KEY USING/)
+			{
+				# We don't have such things in PostgreSQL. Should we just ignore it ? for now just skip this line (and the following)
+				$line=shift(@$refstatement);
+				next;
+			}
 			else
 			{
 				die "I don't understand $line in an CREATE INDEX section";
@@ -1086,6 +1105,14 @@ sub parse_dump
 		{
 			# Doesn't exist in PG
 			next;
+		}
+		elsif ($line =~ /^CREATE ALIAS "(.*?)"\."(.*)"/)
+		{
+			print STDERR "Can't create ALIAS in PostgreSQL: $1.$2 ignored\n";
+		}
+		elsif  ($line =~ /^CREATE SUMMARY TABLE (.*)$/)
+		{
+			print STDERR "PostgreSQL has no summary table. Closest thing is materialized view. Please create a materialized view matching $line\n";
 		}
 		else
 		{

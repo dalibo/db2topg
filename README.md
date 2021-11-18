@@ -1,6 +1,11 @@
 Overview
 ========================
 
+
+> **WARNING:** This project is now inactive and we do not provide any form of 
+> community support for it. If you need commercial support to migrate from DB2 
+> to Postgres, feel free to send a message to contact@dalibo.com 	
+
 This set of scripts converts as much as possible of a DB2 UDB database. It does not work with DB2 zOS.
 
 First, you'll need a SQL dump of your schema. Use the db2topg script to convert it to a PostgreSQL schema.

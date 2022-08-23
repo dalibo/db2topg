@@ -631,7 +631,15 @@ sub parse_dump
 				}
 				elsif ($line =~ /^\s*ORGANIZE BY ROW/)
 				{
-					next;
+					if ($line =~ /BY ROW USING \(/)
+					{
+						# This ORGANIZE has a list of columns on potentialy on several lines
+						# Look for the double closing parenthesis that ends the clause
+						while ($line !~ /\) \)/)
+						{
+							$line=shift(@$refstatement);
+						}
+					}
 				}
 				elsif ($line =~ /^\s*DISTRIBUTE BY/)
 				{

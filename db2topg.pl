@@ -709,6 +709,10 @@ sub parse_dump
 					{
 						push @{$object{COLS}},($1);
 					}
+					elsif ( $line =~ /^\s+(NOT\s+)?ENFORCED/)
+					{
+						next;# Just ignore the [NOT] ENFORCED clause
+					}
 					else
 					{
 						die "I don't understand $line in an ALTER TABLE section";

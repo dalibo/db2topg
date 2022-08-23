@@ -397,7 +397,7 @@ sub parse_dump
 		next if ($line =~ /^COMMIT WORK/);
 		next if ($line =~ /^TERMINATE/);
 		next if ($line =~ /^(CREATE|ALTER) STOGROUP/);
-		next if ($line =~ /^SET NLS_STRING_UNITS/);
+		next if ($line =~ /^SET (SYSIBM\.)?NLS_STRING_UNITS/);
 		next if ($line =~ /^ALTER TABLE.*VOLATILE CARDINALITY/);
 
 		# Special cases for some versions that split create indexes in two lines:

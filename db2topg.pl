@@ -35,9 +35,9 @@ my $db2password;
 
 sub read_and_cleanup_line
 {
-	my $line=<IN>;
+	my $line = <IN>;
 	return undef if (not defined $line);
-	$line=~ s/--.*//;
+	$line =~ s/--.*//;		# Remove comments, if any
 	return $line;
 }
 
@@ -45,63 +45,172 @@ sub read_statement
 {
 	my @statement;
 	my $read;
-	my $seen_end_function=0;
-	my $marker;
-	while (my $line=read_and_cleanup_line())
+	while (my $line = read_and_cleanup_line)
 	{
 		$line =~ s/\r//; # We sometimes have windows input
-		next if ($line=~/^\s*$/);
-		$read=1;
+		next if ($line =~ /^\s*$/);
+		$read = 1;
 		push @statement,($line);
 		# We have an exception for create functions: there will be semi-columns inside…
 		if ($statement[0] !~ /CREATE.*(FUNCTION|PROCEDURE|TRIGGER)/i)
 		{
-			last if ($line=~/;\s*$/);
+			if ($line =~ /;\s*$/)
+			{
+				# Cleanup trailing semi-colon (and spaces after it) on last line
+				$statement[-1] =~ s/;\s*$//;
+				# Remove \n at the end of each line
+				chomp @statement;
+				last;
+			}
 		}
 		else
-		{
-			# There are functions containing SQL, others containing a sort of plpgsql
-			# If the function contains a begin atomic, lets suppose it's sort of plpgsql
-
-			if ( $line =~ /^(?:(.*): )?\s*begin(\s+atomic)\s*/i)
-			{
-				if (defined $1)
-				{
-					$marker=" $1"; # We add a space before, it will simplify the regexp in the following test
-				}
-				else
-				{
-					$marker="";
-				}
-			}
-			if (not defined($marker) )
-			{
-				# Stop as soon as there is a semicolon
-				last if ($line=~/^\s*end\s*;\s*$/i);
-			}
-			else
-			{
-				# We stop when we have seen the "end" keyword, the optional marker and the semi colon after it
-				if ($line =~ /^\s*end${marker}\s*$/i)
-				{
-					$seen_end_function=1;
-				}
-				if ($seen_end_function)
-				{
-					last if ($line=~/;\s*$/);
-				}
-			}
+		{	# Specific statement identification for functions, procedures or triggers
+			my $stmt = read_function_code();
+			push @statement,($stmt);
+			last;
 		}
 	}
 	if ($read)
 	{
-		# Cleanup trailing semi-colon (and spaces after it)
-		$statement[-1]=~ s/;\s*$//;
-		# Remove \n at the end of each line
-		chomp @statement;
 		return \@statement;
 	}
 	return undef; # Behave like read: return undef if reads nothing
+}
+
+sub read_function_code
+{
+	# There are functions containing SQL, others containing a sort of plpgsql
+	# Get the source code and copy as is (keeping blank lines and comments)
+	# The detection of the statement end is based on the END; statements. But possible nested BEGIN END obliged to count blocks
+	# And take into account the labels, comments, literals or identifiers...
+
+	my $line;
+	my $statement = '';
+	my $end_loop = 0;
+	my $remaining = '';
+	my $block_count = 0;
+	my $in_block_comment = 0;
+	my $in_literal = 0;
+	my $in_identifier = 0;
+	my $begin_found = 0;
+	my $end_found = 0;
+	my $labels = '';
+	my $found_kw;
+
+	while (! $end_loop)
+	{
+		if ($remaining eq '')
+		{	# The line is fully analyzed, get another one
+			$line = <IN>;
+			return undef if (not defined $line);
+			chomp $line;
+			$statement .= "\n" if ($statement ne '');
+			$remaining = $line;
+		}
+		elsif ($in_block_comment)
+		{	# We are in a block comment, search for the comment end
+			if ($remaining =~ /^(.*?)(\*\/)(.*)/)
+			{   # We have reached the comment end
+				$statement .= $1 . $2;
+				$remaining = $3;
+				$in_block_comment = 0;
+			}
+			else
+			{
+				$statement .= $remaining;
+				$remaining = '';
+			}
+		}
+		elsif ($in_literal)
+		{	# We are in a literal, search for the literal end (a ' not followed by another ')
+			if ($remaining =~ /^(.*?)('(?!'))(.*)/)
+			{   # We have reached the literal end
+				$statement .= $1 . $2;
+				$remaining = $3;
+				$in_literal = 0;
+			}
+			else
+			{
+				$statement .= $remaining;
+				$remaining = '';
+			}
+		}
+		elsif ($in_identifier)
+		{	# We are in an identifier, search for the identifier end
+			if ($remaining =~ /^(.*?)(")(.*)/)
+			{   # We have reached the identifier end
+				$statement .= $1 . $2;
+				$remaining = $3;
+				$in_identifier = 0;
+			}
+			else
+			{
+				die "Identifier end not found on line $line\n";
+			}
+		}
+		elsif ($begin_found)
+		{	# The previous word was a BEGIN, check if it was really a block start
+			if ($remaining =~ /^\s*(TRANSACTION|WORK|;)/i)
+			{ # In fact not a block start, but a transaction start, so keep the remaining as is
+				$block_count--;
+			}
+			$begin_found = 0;
+		}
+		elsif ($end_found)
+		{	# The previous word was an END, check if it was really a block end
+			if ($remaining =~ /^\s*($labels)?\s*;/)
+			{ # The block end is confirmed
+				$block_count--;
+				$end_loop = ($block_count == 0);
+				$end_found = 0;
+			}
+			$end_found = 0;
+		}
+		# We are in regular code, search for interesting keywords
+		elsif ($remaining !~ /^(.*?)(--|\/\*|'|"|BEGIN|END|(?:\S+):)(.*)$/i)
+		{	# No interested keyword found
+			$statement .= $remaining;
+			$remaining = '';
+		}
+		else
+		{	# A keyword is found, analyze it and keep the rigth part for the next search
+			$statement .= $1 . $2;
+			$remaining = $3;
+			$found_kw = $2;
+			if ($found_kw eq '--')
+			{   # A line comment start is detected
+				$statement .= $remaining;
+				$remaining = '';
+			}
+			elsif ($found_kw eq '/*')
+			{   # A block comment start is detected
+				$in_block_comment = 1;
+			}
+			elsif ($found_kw eq "'")
+			{   # A literal start is detected
+				$in_literal = 1;
+			}
+			elsif ($found_kw eq '"')
+			{   # An identifier start is detected
+				$in_identifier = 1;
+			}
+			elsif (uc($found_kw) eq 'END')
+			{
+				$end_found = 1;
+			}
+			elsif (uc($found_kw) eq 'BEGIN')
+			{
+				$begin_found = 1;
+				$block_count++;
+			}
+			elsif ($found_kw =~ /(.*):$/i)
+			{   # A label is detected
+				$labels .= "|$1";
+			}
+		}
+	}
+	$statement .= $remaining;
+	return $statement;
 }
 
 # Reads all remaining lines in a statement
@@ -360,8 +469,6 @@ sub find_index_in_schema
 	}
 }
 
-
-
 my $current_schema=''; # Global as this will be set on a per view afterwards
 my $current_path=''; # Global as this will be set on a per view afterwards
 sub parse_dump
@@ -375,8 +482,6 @@ sub parse_dump
         $data_guess .= $line;
     }
     close IN;
-
-
 
     # We now ask guess...
     my $decoder = guess_encoding($data_guess, qw/iso8859-15 utf8 utf16-le utf16-be/);
@@ -1055,9 +1160,9 @@ sub parse_dump
 			$schema_db2->{SCHEMAS}->{$1}->{TRIGGERS}->{$2}->{COMMENT}=$3 . "\n" . slurp_comment($refstatement);
 			chomp $schema_db2->{SCHEMAS}->{$1}->{TRIGGERS}->{$2}->{COMMENT};
 		}
-		elsif ($line =~ /^CREATE(?: OR REPLACE)? (?:FUNCTION|PROCEDURE) (?:(\S+)\.)?(\S+)/)
+		elsif ($line =~ /^CREATE(?: OR REPLACE)? (?:FUNCTION|PROCEDURE) (?:(\S+)\.)?(\S+)/i)
 		{
-			# These are functions. Languages are completely different
+			# These are functions or procedures. But languages are completely different.
 			my $schema;
 			if (defined $1)
 			{
@@ -1075,6 +1180,7 @@ sub parse_dump
 			$function =~ s/^"//;
 			$function =~ s/\s*"//;
 
+			unless ($schema =~ /^"/)
 			{
 				$schema=uc($schema);
 			}
@@ -1085,8 +1191,7 @@ sub parse_dump
 			}
 			$schema_db2->{SCHEMAS}->{$schema}->{FUNCTIONS}->{$function}->{CURRENT_SCHEMA}=$current_schema;
 			$schema_db2->{SCHEMAS}->{$schema}->{FUNCTIONS}->{$function}->{CURRENT_PATH}=$current_path;
-			$schema_db2->{SCHEMAS}->{$schema}->{FUNCTIONS}->{$function}->{STATEMENT}= slurp_statement($refstatement);
-
+			$schema_db2->{SCHEMAS}->{$schema}->{FUNCTIONS}->{$function}->{STATEMENT}=slurp_statement($refstatement);
 		}
 		elsif ($line =~ /^\s*GRANT/)
 		{
@@ -1317,9 +1422,6 @@ sub produce_schema_files
 		}
 	}
 
-
-
-
 	# CREATE PKs and UNIQUE
 	foreach my $schema (keys(%{$schema_db2->{SCHEMAS}}))
 	{
@@ -1405,6 +1507,7 @@ sub produce_schema_files
 		}
 	}
 	# CREATE FKs
+
 	foreach my $schema (keys(%{$schema_db2->{SCHEMAS}}))
 	{
 		foreach my $table (keys(%{$schema_db2->{SCHEMAS}->{$schema}->{TABLES}}))
@@ -1470,12 +1573,6 @@ sub produce_schema_files
 		}
 	}
 
-
-
-
-
-
-
 	# CHECK constraints
 	foreach my $schema (keys(%{$schema_db2->{SCHEMAS}}))
 	{
@@ -1534,7 +1631,7 @@ sub produce_schema_files
 			my $funcobj=$schema_db2->{SCHEMAS}->{$schema}->{FUNCTIONS}->{$function};
 			print UNSURE "CREATE OR REPLACE FUNCTION ", protect_reserved_keywords($function),
 							" AS\n\$func\$\n",
-							$funcobj->{STATEMENT},"\n\$func\$\n;\n";
+							$funcobj->{STATEMENT},";\n\$func\$\n;\n";
 		}
 	}
 
@@ -1549,7 +1646,7 @@ sub produce_schema_files
 			my $trigobj=$schema_db2->{SCHEMAS}->{$schema}->{TRIGGERS}->{$trigger};
 			print UNSURE "CREATE OR REPLACE FUNCTION ", protect_reserved_keywords($trigger . '_fn'),
 							" LANGUAGE plpgsql RETURNS (trigger) AS\n\$func\$\n",
-							$trigobj->{STATEMENT},"\n\$func\$\n;\n";
+							$trigobj->{STATEMENT},";\n\$func\$\n;\n";
 			#FIXME: Should create the trigger, but that's not possible, as the function will fail
 			print UNSURE "-- Add the CREATE TRIGGER too!\n\n\n";
 			if ( exists $trigobj->{COMMENT})
